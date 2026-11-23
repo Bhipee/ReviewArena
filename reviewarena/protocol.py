@@ -16,7 +16,7 @@ def protocol(method,venue,snapshot=None):
     if method=='B':paths+=[DATA/'paper_vectors.npz']
     if method in 'CD':paths+=[ROOT/'reviewarena/transfer.py',labeled_data('critique.parquet',snapshot),labeled_data('taxonomy.parquet',snapshot),labeled_data('family-audits.json',snapshot)]
     if method=='D':paths+=[ROOT/'reviewarena/named_works.py',ROOT/'reviewarena/verifier.py',ROOT/'mcp_scholar_server.py',ROOT/'skills/critique-verifier/SKILL.md']
-    if method=='D':paths+=[ROOT/'reviewarena/comparisons.py',ROOT/'reviewarena/novelty.py',ROOT/'reviewarena/investigation.py',ROOT/'reviewarena/severity.py',ROOT/'reviewarena/consistency.py',DATA/'comparison-pool.sqlite']
+    if method=='D':paths+=[ROOT/'reviewarena/comparisons.py',ROOT/'reviewarena/novelty.py',ROOT/'reviewarena/prior_work.py',ROOT/'reviewarena/investigation.py',ROOT/'reviewarena/severity.py',ROOT/'reviewarena/consistency.py',DATA/'comparison-pool.sqlite']
     if method=='D':paths.extend(sorted((DATA/'publication-records').glob('*.json')))
     api=os.getenv('REVIEWARENA_API_URL','http://127.0.0.1:8766/v1')
     model=os.getenv('REVIEWARENA_MODEL','default_model')

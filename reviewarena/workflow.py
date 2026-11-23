@@ -6,15 +6,15 @@ from .investigation import investigate,cited_weaknesses
 from .reply_writer import compose_response
 from .severity import check_rating
 from .novelty import compare_contributions
+from .prior_work import discover
 from .kb import ROOT,outcomes,current_snapshot
-from .model import ModelJSONError,generate,literature_query
+from .model import ModelJSONError,generate
 from .tools import connect
 from .protocol import protocol
 from .named_works import verify_comparisons
 from .settings import grounded_settings,check_setting_mentions
 from .transfer import adapt_questions
 from .claims import ground_claims,declared_limitations
-from .paper import is_manuscript_title
 
 def skill(name):
     return (ROOT/'skills'/name/'SKILL.md').read_text()
@@ -315,7 +315,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
     snapshot=current_snapshot()
     stamp=protocol(method,venue,snapshot)
     before=before or date.today().isoformat()
-    logs=[];checked=[];contexts=[];sources=[];novelty=[];pages=paper['pages']
+    logs=[];checked=[];contexts=[];sources=[];searches=[];novelty=[];pages=paper['pages']
     if prepared_reading is None:
         claims,paper_type,settings=await inspect_manuscript(paper)
     else:
@@ -346,16 +346,15 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
     if method=='D':
         stage(3,"Checking related papers and prior work")
         contexts=await asyncio.to_thread(comparison_reviews,claims,pages[0],before)
-        query=await asyncio.to_thread(literature_query,claims)
         async with connect('scholar',logs) as scholar:
             await verify_comparisons(checked,before,scholar,ask)
-            if query:
-                try:
-                    hits=await scholar('search_papers',query=query,before=before,limit=5)
-                    sources=[r for r in hits if not is_manuscript_title(r['title'],pages[0])][:3]
-                except RuntimeError:pass
-        stage(3.25,"Comparing claimed contributions with prior work")
-        novelty=await compare_contributions(paper,claims,sources,before,ask)
+            sources,searches=await discover(paper,claims,before,scholar,ask)
+            stage(3.25,"Comparing manuscript claims with published passages")
+            novelty=await compare_contributions(paper,claims,sources,before,ask,scholar)
+    # Catalog hits and inconclusive comparisons are for inspection. Send reviewers the
+    # actual comparison and its sources only after the passage-level check succeeds.
+    reviewer_novelty=[{k:row[k] for k in ('status','claim','page','title','comparison','prior_quote','validation','validation_page') if k in row}
+                      for row in novelty if row['status'] in ('shared_component','distinct','overlapping') and row.get('comparison')]
     kept=[r for r in checked if r['status'] in ('valid','hypothesis')]
     paper_context=[]
     if method in ('A','B'):
@@ -401,9 +400,13 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
                       strengths=["specific supported contribution and its page; empty list if none"],
                       weaknesses=[dict(issue="specific supported limitation; empty list if none",evidence_ids=["source IDs"])],
                       questions=["material unresolved question; empty list if none"])
-            report=await ask(f"Assess the submitted manuscript as the specified reviewer. Give an overall integer rating from the supplied scale even if there are no historical matches. Higher is better. {guidance} Use contribution_comparisons for originality within the compared works. Shared components and insufficient evidence do not warrant a novelty penalty. Historical reviews only illustrate standards. Return one flat JSON object following the form. Write summary as plain text and select exactly one score.",
-                             venue=venue,overall_score_meanings=overall_score_guide(venue),role=role,form=form,claims=claims,settings=settings,manuscript=paper_context,
-                             proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,cross_checks=conflicts,contribution_comparisons=novelty,other_papers=contexts)
+            try:
+                report=await ask(f"Assess the submitted manuscript as the specified reviewer. Give an overall integer rating from the supplied scale even if there are no historical matches. Higher is better. {guidance} Use contribution_comparisons for originality within the compared works. Shared components and insufficient evidence do not warrant a novelty penalty. Historical reviews only illustrate standards. Return one flat JSON object following the form. Write summary as plain text and select exactly one score.",
+                                 venue=venue,overall_score_meanings=overall_score_guide(venue),role=role,form=form,claims=claims,settings=settings,manuscript=paper_context,
+                                 proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,cross_checks=conflicts,contribution_comparisons=reviewer_novelty,other_papers=contexts)
+            except ModelJSONError:
+                # Retry with the compact rating form below when the detailed response is truncated.
+                report={}
             if len(report)==1:
                 nested=next(iter(report.values()))
                 if isinstance(nested,dict) and 'score' in nested:
@@ -414,7 +417,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
         report['score']=rubric_rating(raw_score,rubric['scores'])
         if method=='D' and (report['score'] is None or not isinstance(report.get('summary'),str) or not report['summary'].strip()):
             revised=await ask(f"Assign an overall manuscript score independently of historical matches. Choose exactly one integer from allowed_scores. {guidance} Return JSON with score (integer) and rationale (plain string, one sentence citing a manuscript page) grounded in the supplied manuscript evidence.",
-                              role=role,overall_score_meanings=overall_score_guide(venue),allowed_scores=rubric['scores'],claims=claims,settings=settings,notes=paper_context,cross_checks=conflicts,proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,contribution_comparisons=novelty)
+                              role=role,overall_score_meanings=overall_score_guide(venue),allowed_scores=rubric['scores'],claims=claims,settings=settings,notes=paper_context,cross_checks=conflicts,proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,contribution_comparisons=reviewer_novelty)
             report['score']=rubric_rating(revised.get('score'),rubric['scores'])
             if report['score'] is None:
                 raise ValueError(f"{role} returned no valid {venue} rating after two attempts.")
@@ -449,7 +452,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
         meta=await chair_recommendation(venue,reports,claims,novelty=novelty,research_value=research_value)
     except ValueError as exc:
         meta=dict(error=str(exc))
-    return dict(method=method,venue=venue,research_value=research_value,contribution_comparisons=novelty,manuscript_conflicts=conflicts,rubric=dict(year=2025,score_labels=SCORE_LABELS[venue],**RUBRICS[venue]),comparison_reviews=contexts if method=='D' else [],request=dict(manuscript_sha256=paper.get('hash'),before=before),protocol=stamp,claims=claims,declared_limitations=declared_limitations(paper),paper_type=paper_type,settings=settings,reviews=reports,meta_review=meta,checked=checked,historical_outcome=outcomes([r['candidate']['category'] for r in kept],[r['candidate']['severity'] for r in kept],snapshot) if method=='D' else None,tools=logs,sources=sources)
+    return dict(method=method,venue=venue,research_value=research_value,contribution_comparisons=novelty,prior_searches=searches,manuscript_conflicts=conflicts,rubric=dict(year=2025,score_labels=SCORE_LABELS[venue],**RUBRICS[venue]),comparison_reviews=contexts if method=='D' else [],request=dict(manuscript_sha256=paper.get('hash'),before=before),protocol=stamp,claims=claims,declared_limitations=declared_limitations(paper),paper_type=paper_type,settings=settings,reviews=reports,meta_review=meta,checked=checked,historical_outcome=outcomes([r['candidate']['category'] for r in kept],[r['candidate']['severity'] for r in kept],snapshot) if method=='D' else None,tools=logs,sources=sources)
 
 async def response_evidence(critique,blocks,vectors):
     query=(await asyncio.to_thread(embed,[critique]))[0]

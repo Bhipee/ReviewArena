@@ -941,16 +941,33 @@ if result:
             for row in comparisons:
                 st.markdown(f"**Page {row['page']} · {row['status'].replace('_',' ')}**")
                 st.write(row['claim'])
-                if 'comparison' in row:
-                    st.write(row['comparison'])
+                if row.get('comparison'):st.write(row['comparison'])
+                if row.get('title'):
                     st.markdown(f"[{row['title']}]({row['url']})")
+                    if row.get('prior_source'):
+                        origin=row.get('catalog') or 'Publication'
+                        link="Listed in manuscript references" if row.get('cited_in_manuscript') else "Literature search"
+                        st.caption(f"{origin} · {row['published']} · {link}" if origin!='OpenReview' else "Local OpenReview abstract")
+                        source_label=row['prior_source']+(f" · p. {row['prior_page']}" if row.get('prior_page') else "")
+                        source_url=row['prior_url']
+                        if row.get('prior_page'):
+                            source_url=source_url.partition('#')[0]+f"#page={row['prior_page']}"
+                        st.markdown(f"[{source_label}]({source_url})")
                     st.caption(row['prior_quote'])
-                    if row.get('validation'):
-                        st.write(f"Evidence on page {row['validation_page']} · {row['validation']}")
-                    elif row['status']=='distinct':
-                        st.caption("Direct validation of the difference was not identified.")
-                else:
-                    st.caption("The retrieved abstracts do not establish a contribution-level comparison.")
+                    if anchor:=row.get('citation_in_manuscript'):
+                        st.caption(f"How the manuscript cites this work · p. {anchor['page']}")
+                        st.write(anchor['quote'])
+                if row.get('validation'):
+                    st.write(f"Evidence on page {row['validation_page']} · {row['validation']}")
+                elif row['status']=='distinct':
+                    st.caption("Direct validation of the difference was not identified.")
+                elif row['status']=='Insufficient evidence':
+                    st.caption("The available passages did not establish a specific relationship for this claim.")
+            if 'prior_searches' in result:
+                with st.expander("Literature searches"):
+                    for search in result['prior_searches']:
+                        outcome=(f"{search['matches']} matching records" if search['status']=='complete' else "Catalog unavailable")
+                        st.write(f"{search['kind'].capitalize()} · {search['query']} · {outcome}")
     if conflicts:=result.get('manuscript_conflicts'):
         with st.expander("Manuscript consistency checks",expanded=True):
             for finding in conflicts:

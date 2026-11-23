@@ -828,7 +828,7 @@ if result:
     meta=result['meta_review']
     if mode=="Live" and meta.get('rationale_version')!=2:
         if st.button(f"Generate AC recommendation with {model_label}"):
-            revised=call(chair_recommendation(result['venue'],result['reviews'],result.get('claims'),decision=meta.get('recommendation'),novelty=result.get('contribution_comparisons')))
+            revised=call(chair_recommendation(result['venue'],result['reviews'],result.get('claims'),decision=meta.get('recommendation'),novelty=result.get('contribution_comparisons'),research_value=result.get('research_value')))
             if revised:
                 result['meta_review']=meta=revised
     if meta.get('recommendation') in ('Accept','Reject'):
@@ -888,6 +888,10 @@ if result:
                         render_text(report[field])
     if result.get('method')=='D' and 'contribution_comparisons' in result:
         with st.expander("Originality and prior work",expanded=True):
+            if value:=result.get('research_value'):
+                st.markdown("**Research value**")
+                st.write(value['value'])
+                st.caption(f"Page {value['page']} · {value['quote']}")
             comparisons=result['contribution_comparisons']
             if not comparisons:
                 st.caption("No page-grounded contribution available for comparison.")

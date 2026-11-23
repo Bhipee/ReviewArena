@@ -653,6 +653,7 @@ if activity=="Manuscript review":
 cutoff=st.sidebar.date_input("Prior work published before",value=date(2024,10,1) if sample else date.today())
 if activity=="Rebuttal":
     st.header("Rebuttal workbench")
+    if sample:paper['title']=sample['title']
     example=""
     if sample:
         truth_path=DATA/'truth-labels'/(sample['id']+'.json')
@@ -679,6 +680,16 @@ if activity=="Rebuttal":
         for item in result['responses']:
             a=item['answer'];st.subheader(item['critique'])
             st.caption(' · '.join(s for s in (item.get('category'),a['action'].capitalize()) if s))
+            if 'next_step' in a:
+                st.markdown("**Existing manuscript evidence**")
+                if source:=a.get('existing_evidence'):
+                    st.write(source['quote'])
+                    st.caption(f"Page {source['page']} · {source.get('role','')}")
+                else:
+                    st.caption("No supporting passage selected for this point.")
+                st.markdown("**Suggested next step**")
+                st.write(a['next_step'])
+                st.markdown("**Response to reviewer**")
             st.write(a['draft'])
             for name,counts in item.get('strategy_outcomes',{}).items():
                 linked=[h for h in item['history'] if h.get('reply_strategy')==name]

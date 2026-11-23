@@ -3,6 +3,7 @@ from datetime import date
 from .consistency import check_manuscript
 from .comparisons import comparison_reviews
 from .investigation import investigate,cited_weaknesses
+from .reply_writer import compose_response
 from .severity import check_rating
 from .novelty import compare_contributions
 from .kb import ROOT,outcomes,current_snapshot
@@ -519,11 +520,9 @@ async def rebuttal(paper,text):
             ref=plan.get('evidence_index',0)
             quote=evidence[ref-1] if type(ref) is int and 0<ref<=len(evidence) else None
             if action=='clarify' and (not quote or quote['role']!='addresses'):action='revise'
-            lines=["Thank you for raising the following point: "+critique.rstrip('.')+"."]
-            if quote:lines.append(f"Our manuscript states on page {quote['page']}: “{quote['quote']}”")
             step=str(plan.get('planned_step','')).strip()
             if not step or any(x in step.lower() for x in ['we have','we found','our results show','we conducted','we demonstrate']):step='Address the reviewer’s question about '+critique.rstrip('.')+'.'
-            lines.append("Planned revision: "+step)
-            answer=dict(action=action,draft=' '.join(lines),experiment=step if action=='experiment' else '',priority=plan.get('priority',2),effort=plan.get('effort','To estimate'),historical_strategies=strategies)
+            draft=await compose_response(ask,paper,critique,quote,step,history)
+            answer=dict(action=action,draft=draft,existing_evidence=quote,next_step=step,experiment=step if action=='experiment' else '',priority=plan.get('priority',2),effort=plan.get('effort','To estimate'),historical_strategies=strategies)
             responses.append(dict(critique=critique,category=category,answer=answer,evidence=evidence,history=history,strategy_outcomes=outcomes_by_strategy))
     return dict(responses=responses,tools=logs)

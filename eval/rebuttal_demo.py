@@ -15,7 +15,7 @@ async def main():
     if not res['responses'] or any(item['critique'] not in quote for item in res['responses']):
         raise ValueError('A reply could not be traced to the pasted reviewer text')
     for item in res['responses']:
-        if item['answer']['action']=='clarify' and not any(ev.get('role')=='addresses' and ev['quote'] in item['answer']['draft'] for ev in item['evidence']):
+        if item['answer']['action']=='clarify' and not any(ev.get('role')=='addresses' and ev == item['answer'].get('existing_evidence') for ev in item['evidence']):
             raise ValueError('A clarification needs a quotation that answers the concern')
         for ev in item['evidence']:
             if ev['quote'] not in paper['pages'][ev['page']-1]:

@@ -7,6 +7,7 @@ CAPTION=re.compile(r'^(Figure|Fig\.|Table)\s+([A-Z]?\d+(?:\.\d+)*(?:[a-z])?)\s*[
 
 def parse_pdf(content):
     with pymupdf.open(stream=content,filetype="pdf") as pdf:
+        title=(pdf.metadata or {}).get("title") or ""
         raw=[p.get_text(sort=True) for p in pdf]
         pages=[" ".join(text.split()) for text in raw]
         status=re.compile(r"(?:published as a (?:conference|workshop) paper at|under review as a (?:conference|workshop) paper at|submitted to)\s+(?:ICLR|NeurIPS)\s*20\d{2}",re.I)
@@ -32,7 +33,7 @@ def parse_pdf(content):
                     kind='Table' if match[1].lower()=='table' else 'Figure'
                     captions.append(dict(page=number,label=kind+' '+match[2],quote=quote))
     if not any(pages):raise ValueError("This PDF has no extractable text. Upload a searchable PDF.")
-    return {"hash":hashlib.sha256(content).hexdigest(),"pages":pages,"captions":captions,"tables":tables,"sections":section_map([status.sub("",text) for text in raw])}
+    return {"title":title,"hash":hashlib.sha256(content).hexdigest(),"pages":pages,"captions":captions,"tables":tables,"sections":section_map([status.sub("",text) for text in raw])}
 
 def is_manuscript_title(title,first_page):
     def folded(text):

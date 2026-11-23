@@ -3,6 +3,7 @@ from datetime import date
 from .consistency import check_manuscript
 from .comparisons import comparison_reviews
 from .investigation import investigate,cited_weaknesses
+from .severity import check_rating
 from .novelty import compare_contributions
 from .kb import ROOT,outcomes,current_snapshot
 from .model import generate,literature_query
@@ -391,6 +392,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
             report['investigation']=trace
             excerpts=[dict(id=row['id'],page=row['page'],quote=row['excerpt']) for row in paper_context]
             report['weaknesses']=cited_weaknesses(report.get('weaknesses'),trace,shared+excerpts)
+            await check_rating(report,role,claims,conflicts,pages,SCORE_LABELS[venue],ask)
         else:
             for field in list(report):
                 if field.lower().startswith('weak') and field!='weaknesses':

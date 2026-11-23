@@ -860,6 +860,11 @@ if result:
             st.caption(f"Score · {score} ({label})" if label else f"Score · {score}")
             st.write(report.get('summary',''))
             if report.get('score_rationale'):st.write(report['score_rationale'])
+            if check:=report.get('rating_check'):
+                with st.expander("Evidence affecting the rating"):
+                    for passage in check['evidence']:
+                        st.caption(f"Page {passage['page']}")
+                        st.write(passage['quote'])
             if 'investigation' in report:
                 with st.expander("Reviewer investigation"):
                     if not report['investigation']:

@@ -17,7 +17,7 @@ from reviewarena.comparison_reader import inspect_comparison
 from reviewarena.workflow import ask
 from reviewarena.lab import run_lab,meeting_markdown
 from reviewarena.summary_ui import render_summary
-from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes,check_historical_concern
+from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes
 from reviewarena.library import document,list_documents,read_documents,save_documents,saved_pdf
 
 st.set_page_config(page_title="ReviewArena",layout="wide")
@@ -761,24 +761,6 @@ elif reading_job in st.session_state:
     st.session_state.pop(reading_job).cancel()
 if scope is not None:
     render_scope(content,scope)
-with st.expander("Check one historical concern live"):
-    critique_index=current_snapshot()/'critique.parquet'
-    if critique_index.exists():
-        import pyarrow.parquet as pq
-        cases=pq.read_table(critique_index).to_pylist()
-        case=st.selectbox("Historical concern",cases,format_func=lambda c:c['category']+" · "+c['title'][:42])
-        st.caption(case['critique_text'])
-        if st.button("Find and verify manuscript evidence"):
-            with st.spinner("Searching the manuscript and appendix…"):
-                try:
-                    v=check_historical_concern(paper,case,cutoff.isoformat(),scope['claims'] if scope else None)
-                    c=v['candidate']
-                    st.caption(f"Current manuscript p. {c['matched_claim_page']} · "+c['matched_claim'])
-                    if c.get('target_question'):st.write(c['target_question'])
-                    st.markdown("**"+v['status'].capitalize()+"**")
-                    st.write(v['reason'])
-                    for ev in v['evidence']:show_evidence(content,ev)
-                except Exception as exc:st.error(str(exc))
 mode=st.radio("Review mode",["Live","Replay"],horizontal=True)
 cache=DATA/'replays'/(key+'.json')
 if mode=='Replay':

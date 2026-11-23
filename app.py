@@ -524,8 +524,12 @@ if activity=="Lab meeting":
         st.success(f"Decision saved. Select {saved_name} for the next brief.")
     library=list_documents()
     selected=st.multiselect("Saved lab documents",library,format_func=lambda item:f"{item[0]} · {item[1][:8]}") if library else []
-    task_names={'question':'Q&A','related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief'}
+    task_names={'question':'Q&A','related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief','summary':'Paper summary'}
     mode=st.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
+    if mode=='summary':
+        from reviewarena.summary_ui import render_summary
+        render_summary(files,selected,model_label)
+        st.stop()
     use_demo=st.checkbox("Use the public research-group example")
     replay=None
     replay_file=DATA/'lab-replays'/(mode+'.json')

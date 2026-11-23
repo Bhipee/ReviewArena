@@ -646,9 +646,11 @@ else:
     content=f.getvalue()
 try:paper=parse_pdf(content)
 except Exception as exc:st.error(str(exc));st.stop()
-venue=st.sidebar.selectbox("Target venue",['ICLR','NeurIPS'])
+venues=['ICLR','NeurIPS']
+if activity=="Manuscript review":
+    venue=st.sidebar.selectbox("Target venue",venues,index=venues.index(st.session_state.get('last_review_venue','ICLR')),key="review_venue")
+    st.session_state['last_review_venue']=venue
 cutoff=st.sidebar.date_input("Prior work published before",value=date(2024,10,1) if sample else date.today())
-key=f"{paper['hash']}-{venue}-{cutoff}"
 if activity=="Rebuttal":
     st.header("Rebuttal workbench")
     example=""
@@ -658,7 +660,15 @@ if activity=="Rebuttal":
             example=json.loads(truth_path.read_text())[0]['quote']
     text=st.text_area("Paste reviewer comments",value=example)
     replay_file=DATA/'rebuttal-replays'/(paper['hash']+'-'+hashlib.sha256(text.encode()).hexdigest()+'.json')
-    rkey=key+hashlib.sha256(text.encode()).hexdigest()
+    comment_hash=hashlib.sha256(text.encode()).hexdigest()
+    rkey=f"rebuttal-{paper['hash']}-{cutoff}-{comment_hash}"
+    for prefix in ('','works-'):
+        if prefix+rkey not in st.session_state:
+            for previous in dict.fromkeys([st.session_state.get('last_review_venue','ICLR'),*venues]):
+                old=f"{prefix}{paper['hash']}-{previous}-{cutoff}{comment_hash}"
+                if old in st.session_state:
+                    st.session_state[prefix+rkey]=st.session_state[old]
+                    break
     if st.button("Check works mentioned by the reviewer",disabled=not text.strip()):
         st.session_state['works-'+rkey]=call(inspect_comparison(paper,text,cutoff.isoformat(),ask))
     if reading:=st.session_state.get('works-'+rkey):
@@ -699,6 +709,7 @@ if activity=="Rebuttal":
             st.write(action)
         st.download_button("Download Markdown",rebuttal_markdown(result["responses"]),"rebuttal.md")
     st.stop()
+key=f"{paper['hash']}-{venue}-{cutoff}"
 st.header(sample['title'] if sample else f.name)
 if paper.get('sections'):
     with st.expander("Manuscript sections"):

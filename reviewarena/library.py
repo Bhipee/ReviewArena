@@ -54,3 +54,20 @@ def saved_pdf(digest,path=DEFAULT_PATH):
             return None
         row=db.execute('select content from pdf_files where digest=?',(digest,)).fetchone()
     return row[0] if row else None
+
+
+def saved_source(digest, path=DEFAULT_PATH):
+    """Recover an older summary reference from the lab library by exact content hash."""
+    pdf = saved_pdf(digest, path)
+    if pdf is not None or not path.exists():
+        return pdf
+    with closing(sqlite3.connect(path)) as db:
+        row = db.execute("SELECT pages FROM documents WHERE digest=? LIMIT 1", (digest,)).fetchone()
+    if row:
+        pages = json.loads(row[0])
+        if len(pages) == 1:
+            for encoding in ("utf-8", "utf-8-sig"):
+                content = pages[0].encode(encoding)
+                if hashlib.sha256(content).hexdigest() == digest:
+                    return content
+    return None

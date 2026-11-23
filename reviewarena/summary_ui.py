@@ -1,11 +1,69 @@
 """Paper-summary workspace inside Lab meeting."""
 import hashlib
 import json
+import sqlite3
 
 import streamlit as st
 
 from .library import document, read_documents
-from .paper_summary import DEFAULT_PROMPT, history, save_summary, summarize
+from .paper_summary import DEFAULT_PROMPT, summarize
+from .summary_store import (
+    history,
+    list_templates,
+    load_template,
+    save_summary,
+    save_template,
+    template_from_history,
+)
+
+
+def open_template(template_id):
+    st.session_state["lab-summary-editor"] = load_template(template_id)
+    # Streamlit uploaders cannot be populated programmatically. Start fresh widgets
+    # and keep the template's original file as the default attachment for each row.
+    st.session_state["lab-summary-editor-version"] = (
+        st.session_state.get("lab-summary-editor-version", 0) + 1
+    )
+
+
+def render_examples(loaded, key):
+    count = st.number_input(
+        "Number of summary examples",
+        min_value=0,
+        value=len(loaded),
+        step=1,
+        key=key + "count",
+    )
+    examples = []
+    for i in range(count):
+        previous = loaded[i] if i < len(loaded) else {}
+        with st.expander(f"Example {i+1}", expanded=True):
+            attachment = {
+                k: previous[k] for k in ("name", "digest", "content") if k in previous
+            }
+            if attachment:
+                if attachment.get("content") is None:
+                    st.warning(
+                        f"Original file unavailable: {attachment['name']}. Reattach it or remove the reference."
+                    )
+                else:
+                    st.caption(f"Saved reference · {attachment['name']}")
+                if st.checkbox("Remove saved reference", key=f"{key}remove-{i}"):
+                    attachment = {}
+            upload = st.file_uploader(
+                "Reference paper (optional)",
+                type=["pdf", "txt", "md"],
+                key=f"{key}paper-{i}",
+            )
+            if upload is not None:
+                attachment = {"name": upload.name, "content": upload.getvalue()}
+            summary = st.text_area(
+                "Example summary",
+                value=previous.get("summary", ""),
+                key=f"{key}example-{i}",
+            )
+            examples.append(dict(attachment, summary=summary))
+    return examples
 
 
 def render_summary(files, selected, model_label):
@@ -21,52 +79,97 @@ def render_summary(files, selected, model_label):
         list(choices),
         placeholder="Upload a paper or select one from the library",
     )
-    prompt = st.text_area("Summary instructions", value=DEFAULT_PROMPT, height=100)
-    count = st.number_input("Number of summary examples", min_value=0, value=0, step=1)
-    pairs = []
-    for i in range(count):
-        with st.expander(f"Example {i+1}", expanded=True):
-            reference = st.file_uploader(
-                "Reference paper (optional)",
-                type=["pdf", "txt", "md"],
-                key=f"summary-paper-{i}",
+
+    templates = dict(list_templates())
+    if notice := st.session_state.pop("lab-summary-template-notice", None):
+        st.success(notice)
+    if missing := st.session_state.pop("lab-summary-missing-references", None):
+        st.warning(
+            "These older references need to be reattached: " + ", ".join(missing)
+        )
+    if templates:
+        if pick := st.session_state.pop("lab-summary-select-template", None):
+            st.session_state["lab-summary-picker"] = pick
+        selected_template = st.selectbox(
+            "Saved templates",
+            list(templates),
+            format_func=lambda i: f"{templates[i]} · #{i}",
+            key="lab-summary-picker",
+        )
+        if st.button("Load template"):
+            open_template(selected_template)
+
+    loaded = st.session_state.get("lab-summary-editor", {})
+    key = f"lab-summary-edit-{st.session_state.get('lab-summary-editor-version', 0)}-"
+    if loaded:
+        st.caption(f"Editing template #{loaded['id']} · {loaded['name']}")
+    prompt = st.text_area(
+        "Summary instructions",
+        value=loaded.get("prompt", DEFAULT_PROMPT),
+        height=100,
+        key=key + "prompt",
+    )
+    examples = render_examples(loaded.get("examples", []), key)
+    valid = bool(prompt.strip()) and all(e["summary"].strip() for e in examples)
+
+    name = st.text_input(
+        "Template name", value=loaded.get("name", ""), key=key + "name"
+    )
+    save_copy = st.button(
+        "Save as new template", disabled=not valid or not name.strip()
+    )
+    update = loaded and st.button(
+        "Update loaded template", disabled=not valid or not name.strip()
+    )
+    if save_copy or update:
+        try:
+            saved_id = save_template(
+                name,
+                prompt,
+                examples,
+                template_id=loaded["id"] if update else None,
+                revision=loaded["revision"] if update else None,
             )
-            example = st.text_area("Example summary", key=f"summary-example-{i}")
-            pairs.append((reference, example))
+            open_template(saved_id)
+            st.session_state["lab-summary-select-template"] = saved_id
+            st.session_state[
+                "lab-summary-template-notice"
+            ] = f"Template saved · {name.strip()}"
+            st.rerun()
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            st.error(str(exc))
+
+    missing_reference = any(
+        e.get("name") and e.get("content") is None for e in examples
+    )
     if st.button(
         "Generate and save summary",
-        disabled=not target
-        or not prompt.strip()
-        or any(not e.strip() for _, e in pairs),
+        disabled=not target or not valid or missing_reference,
     ):
         try:
             with st.spinner("Summarizing paper…"):
-                name, digest, content = choices[target]
+                paper_name, digest, content = choices[target]
                 doc = (
-                    document(name, content)
+                    document(paper_name, content)
                     if content is not None
-                    else read_documents([(name, digest)])[target]
+                    else read_documents([(paper_name, digest)])[target]
                 )
-                examples = []
-                for upload, example in pairs:
-                    item = dict(summary=example)
-                    if upload is not None:
-                        raw = upload.getvalue()
-                        item.update(
-                            name=upload.name,
-                            digest=hashlib.sha256(raw).hexdigest(),
-                            paper=document(upload.name, raw),
-                        )
-                    examples.append(item)
+                for e in examples:
+                    if e.get("content") is not None:
+                        e["paper"] = document(e["name"], e["content"])
                 output = summarize(doc, prompt, examples)
                 saved = save_summary(
-                    name, digest, prompt, examples, model_label, output
+                    paper_name, digest, prompt, examples, model_label, output
                 )
             st.session_state["lab-summary-record"] = saved
             st.session_state["lab-summary-search"] = ""
             st.success("Summary saved to local history.")
         except Exception as exc:
             st.error(f"Could not generate and save the summary. {exc}")
+    render_history()
+
+
+def render_history():
     st.subheader("Summary history")
     query = st.text_input(
         "Search by paper, instructions or summary text", key="lab-summary-search"
@@ -84,6 +187,21 @@ def render_summary(files, selected, model_label):
     )
     record = by_id[selected_id]
     st.markdown(record["summary"])
+    if st.button(
+        "Save history as new template",
+        help="Copy the instructions, examples and reference papers used for this summary.",
+    ):
+        try:
+            template_id, missing = template_from_history(selected_id)
+        except (OSError, sqlite3.Error) as exc:
+            st.error(f"Could not save the template. {exc}")
+            return
+        st.session_state["lab-summary-select-template"] = template_id
+        st.session_state[
+            "lab-summary-template-notice"
+        ] = f"Created template #{template_id} from summary #{selected_id}."
+        st.session_state["lab-summary-missing-references"] = missing
+        st.rerun()
     with st.expander("Instructions and examples used"):
         st.caption(f"Model · {record['model']}")
         st.write(record["prompt"])

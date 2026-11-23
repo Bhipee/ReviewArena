@@ -1,13 +1,9 @@
 """Generate paper summaries with user-supplied demonstrations and retain local history."""
-import json
 import os
-import sqlite3
-from contextlib import closing
 
-from .library import DEFAULT_PATH
+from .summary_store import HISTORY, history, save_summary
 from .model import model_post
 
-HISTORY = DEFAULT_PATH.with_suffix(".summaries.sqlite3")
 DEFAULT_PROMPT = (
     "Summarize the research question, the authors’ approach, the strongest evidence, "
     "and the main limitation. Explain what another researcher can learn from the work."
@@ -164,43 +160,3 @@ def summarize(doc, prompt, examples):
             dict(role="user", content=f"{instructions}\nTarget paper:\n{source}"),
         ]
     )
-
-
-def save_summary(name, digest, prompt, examples, model, summary, path=HISTORY):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    metadata = [
-        {k: e[k] for k in ("name", "digest", "summary") if k in e} for e in examples
-    ]
-    with closing(sqlite3.connect(path)) as db, db:
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY, created TEXT DEFAULT CURRENT_TIMESTAMP,
-            name TEXT, digest TEXT, prompt TEXT, examples TEXT, model TEXT, summary TEXT)"""
-        )
-        return db.execute(
-            "INSERT INTO summaries(name,digest,prompt,examples,model,summary) VALUES (?,?,?,?,?,?)",
-            (
-                name,
-                digest,
-                prompt,
-                json.dumps(metadata, ensure_ascii=False),
-                model,
-                summary,
-            ),
-        ).lastrowid
-
-
-def history(query="", path=HISTORY):
-    if not path.exists():
-        return []
-    with closing(sqlite3.connect(path)) as db:
-        db.row_factory = sqlite3.Row
-        return [
-            dict(r)
-            for r in db.execute(
-                """
-            SELECT * FROM summaries WHERE instr(lower(name),lower(?)) OR instr(lower(summary),lower(?))
-            OR instr(lower(prompt),lower(?)) ORDER BY id DESC""",
-                (query, query, query),
-            )
-        ]

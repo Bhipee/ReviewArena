@@ -16,6 +16,7 @@ from reviewarena.claims import declared_limitations
 from reviewarena.comparison_reader import inspect_comparison
 from reviewarena.workflow import ask
 from reviewarena.lab import run_lab,meeting_markdown
+from reviewarena.summary_ui import render_summary
 from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes,check_historical_concern
 from reviewarena.library import document,list_documents,read_documents,save_documents,saved_pdf
 
@@ -527,7 +528,6 @@ if activity=="Lab meeting":
     task_names={'question':'Q&A','related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief','summary':'Paper summary'}
     mode=st.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
     if mode=='summary':
-        from reviewarena.summary_ui import render_summary
         render_summary(files,selected,model_label)
         st.stop()
     use_demo=st.checkbox("Use the public research-group example")

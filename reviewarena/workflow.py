@@ -522,7 +522,7 @@ async def rebuttal(paper,text):
             if action=='clarify' and (not quote or quote['role']!='addresses'):action='revise'
             step=str(plan.get('planned_step','')).strip()
             if not step or any(x in step.lower() for x in ['we have','we found','our results show','we conducted','we demonstrate']):step='Address the reviewer’s question about '+critique.rstrip('.')+'.'
-            draft=await compose_response(ask,paper,critique,quote,step,history)
+            draft=await compose_response(ask,paper,critique,quote,step,history,action=action)
             answer=dict(action=action,draft=draft,existing_evidence=quote,next_step=step,experiment=step if action=='experiment' else '',priority=plan.get('priority',2),effort=plan.get('effort','To estimate'),historical_strategies=strategies)
             responses.append(dict(critique=critique,category=category,answer=answer,evidence=evidence,history=history,strategy_outcomes=outcomes_by_strategy))
     return dict(responses=responses,tools=logs)

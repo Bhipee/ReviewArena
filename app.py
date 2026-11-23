@@ -681,12 +681,10 @@ if activity=="Rebuttal":
             a=item['answer'];st.subheader(item['critique'])
             st.caption(' · '.join(s for s in (item.get('category'),a['action'].capitalize()) if s))
             if 'next_step' in a:
-                st.markdown("**Existing manuscript evidence**")
                 if source:=a.get('existing_evidence'):
+                    st.markdown("**Existing manuscript evidence**")
                     st.write(source['quote'])
                     st.caption(f"Page {source['page']} · {source.get('role','')}")
-                else:
-                    st.caption("No supporting passage selected for this point.")
                 st.markdown("**Suggested next step**")
                 st.write(a['next_step'])
                 st.markdown("**Response to reviewer**")

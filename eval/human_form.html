@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Independent review · RATER_ID</title>
+<style>
+:root{font-family:Calibri,Arial,sans-serif;color:#182e28;background:#f8f8f5}
+main{max-width:48rem;margin:2rem auto;padding:0 1rem}article{background:white;border:1px solid #d0d8d4;padding:1.4rem;margin:1rem 0}
+h1{font-size:1.8rem}h2{font-size:1rem;color:#406452}p,blockquote{line-height:1.5;white-space:pre-wrap}blockquote{margin:0;border-left:3px solid #c5d7ce;padding-left:1rem}
+button,select{font:inherit;padding:.45rem .65rem;margin:.2rem}fieldset{padding:.7rem;border:1px solid #becdc2}
+label{display:inline-block;padding:.3rem}footer{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin:1rem 0}
+</style><main>
+<h1>Independent review · RATER_ID</h1>
+<p>Does the prediction identify the same specific concern as the reviewer? A shared topic alone is insufficient. Work independently. Download your CSV before closing this page.</p>
+<div><label for="jump">Pair</label> <select id="jump"></select> <span id="progress" aria-live="polite"></span></div>
+<article><h2>Prediction</h2><p id="prediction"></p><h2>Reviewer concern</h2><p id="concern"></p><h2>Original reviewer wording</h2><blockquote id="quote"></blockquote></article>
+<fieldset><legend>Your judgment</legend>
+<label><input name="label" type="radio" value="1"> Same issue</label>
+<label><input name="label" type="radio" value="0"> Different issue</label>
+<button id="clear">Clear</button></fieldset>
+<footer><button id="prev">Previous</button><button id="next">Next</button><button id="unanswered">Next unanswered</button></footer>
+<footer><button id="download">Download my CSV</button><label>Resume from my CSV <input type="file" id="resume" accept=".csv"></label></footer>
+<p role="status" id="notice"></p></main><script type="application/json" id="sample">SAMPLE_JSON</script>
+<script>
+const sample=JSON.parse(document.querySelector('#sample').textContent), get=id=>document.getElementById(id);
+const columns=['sample_id','prediction','review_critique','same_issue'];
+const labels=Array(sample.length).fill('');let current=0;
+for(const row of sample)get('jump').add(new Option(String(row.sample_id+1),row.sample_id));
+const draftKey='ReviewArena:SAMPLE_HASH:RATER_ID';
+function saveDraft(){
+ try{localStorage.setItem(draftKey,JSON.stringify(labels))}
+ catch{get('notice').textContent='Browser storage is unavailable. Download your CSV to keep your ratings.'}
+}
+function restoreDraft(){
+ try{
+  const saved=JSON.parse(localStorage.getItem(draftKey));
+  if(Array.isArray(saved)&&saved.length===sample.length&&saved.every(v=>['','0','1'].includes(v))){
+   labels.splice(0,labels.length,...saved);current=Math.max(0,labels.indexOf(''));
+   get('notice').textContent='Local draft restored.';
+  }
+ }catch{}
+}
+function render(){
+ const row=sample[current];
+ get('jump').value=current;get('prediction').textContent=row.prediction;get('concern').textContent=row.review_critique;get('quote').textContent=row.quote;
+ document.querySelectorAll('input[name=label]').forEach(r=>r.checked=labels[current]===r.value);
+ get('progress').textContent=labels.filter(Boolean).length+' of '+sample.length+' scored';
+ get('prev').disabled=current===0;get('next').disabled=current===sample.length-1;
+ get('unanswered').disabled=!labels.includes('');
+}
+document.querySelectorAll('input[name=label]').forEach(r=>r.onchange=()=>{labels[current]=r.value;saveDraft();render()});
+get('clear').onclick=()=>{labels[current]='';saveDraft();render()};
+get('jump').onchange=e=>{current=Number(e.target.value);render()};
+get('prev').onclick=()=>{current--;render()};get('next').onclick=()=>{current++;render()};
+get('unanswered').onclick=()=>{for(let n=1;n<=sample.length;n++){const i=(current+n)%sample.length;if(labels[i]===''){current=i;break}}render()};
+const escapeCSV=s=>'"'+String(s).replaceAll('"','""')+'"';
+get('download').onclick=()=>{
+ const rows=[columns,...sample.map((r,i)=>[r.sample_id,r.prediction,r.review_critique,labels[i]])];
+ const blob=new Blob([rows.map(r=>r.map(escapeCSV).join(',')).join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='RATER_ID.csv';link.click();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
+};
+function parseCSV(text){
+ const rows=[];let row=[],value='',quoted=false;
+ for(let i=0;i<text.length;i++){const c=text[i];
+  if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++}else quoted=!quoted}
+  else if(!quoted&&c===','){row.push(value);value=''}
+  else if(!quoted&&(c==='\r'||c==='\n')){if(c==='\r'&&text[i+1]==='\n')i++;row.push(value);rows.push(row);value='';row=[]}
+  else value+=c;
+ }
+ if(quoted)throw Error('Invalid CSV quoting');
+ if(value||row.length){row.push(value);rows.push(row)}return rows;
+}
+get('resume').onchange=async e=>{
+ try{
+  const rows=parseCSV((await e.target.files[0].text()).replace(/^\uFEFF/,''));
+  if(rows.shift().join(',')!==columns.join(',')||rows.length!==sample.length)throw Error('This CSV does not match the form');
+  const pending=new Map();
+  for(const [id,pred,ref,label] of rows){const i=Number(id),r=sample[i];
+   if(!r||String(i)!==id||pending.has(i)||r.prediction!==pred||r.review_critique!==ref||!['','0','1'].includes(label))throw Error('Changed sample or invalid rating');
+   pending.set(i,label);
+  }
+  for(const [i,v] of pending)labels[i]=v;
+  current=Math.max(0,labels.indexOf(''));render();get('notice').textContent='Ratings restored.';saveDraft();
+ }catch(err){get('notice').textContent=err.message}e.target.value='';
+};
+restoreDraft();render();
+</script></html>

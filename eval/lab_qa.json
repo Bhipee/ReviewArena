@@ -1,0 +1,142 @@
+[
+  {
+    "paper_id": "5NTt8GFjUHkr",
+    "question": "What does Auto-CoT automate, and what safeguard does it add for generated reasoning chains?",
+    "answer": "It automatically samples diverse questions and uses Zero-Shot-CoT to generate reasoning demonstrations, then applies post-processing quality control to make the chains usable.",
+    "page": 1,
+    "quote": "Our proposed Auto-CoT method automaticaly samples diverse questions and we perform post- processing quality control to generate usable reasoning chains from Zero-Shot- CoT."
+  },
+  {
+    "paper_id": "5NTt8GFjUHkr",
+    "question": "Why can retrieving the most similar questions amplify errors in Retrieval-Q-CoT?",
+    "answer": "Hard test questions tend to retrieve similarly hard questions that the model already gets wrong, so their flawed demonstrations can reinforce the same mistake.",
+    "page": 4,
+    "quote": "In other words, for hard questions like those in Figure 2, retrieval tends to retrieve similarly hard questions that the model gets wrong."
+  },
+  {
+    "paper_id": "5NTt8GFjUHkr",
+    "question": "What simple criteria does Auto-CoT use when accepting a generated demonstration?",
+    "answer": "It accepts a candidate only when the question is at most 60 tokens and its rationale has at most five reasoning steps.",
+    "page": 7,
+    "quote": "choose the selected demonstration if it has a question with no more than 60 tokens and a rationale with no more than 5 reasoning steps."
+  },
+  {
+    "paper_id": "5NTt8GFjUHkr",
+    "question": "What is the paper's high-level result for Auto-CoT compared with manually designed CoT demonstrations?",
+    "answer": "Across ten reasoning tasks, Auto-CoT is reported to perform competitively with Manual-CoT, while automatically creating dataset-specific demonstrations without human intervention.",
+    "page": 8,
+    "quote": "Overall, Auto-CoT performs competitively compared to Manual-CoT that requires manual designs of demonstrations."
+  },
+  {
+    "paper_id": "5NTt8GFjUHkr",
+    "question": "What property of in-context learning does Auto-CoT rely on to tolerate imperfect demonstrations?",
+    "answer": "It relies on in-context learning being robust to small amounts of error; cluster-based sampling and simple quality heuristics are used to limit the effect of erroneous examples.",
+    "page": 9,
+    "quote": "Auto-CoT relies on the fact that ICL is robust to small amounts of error."
+  },
+  {
+    "paper_id": "cp5PvcI6w8_",
+    "question": "How is TabPFN trained before deployment on a real tabular dataset?",
+    "answer": "It is trained offline once to approximate Bayesian inference over synthetic datasets sampled from a designed prior; the resulting network is then reused for new datasets.",
+    "page": 1,
+    "quote": "TabPFN is a Prior-Data Fitted Network (PFN) and is trained offline once, to approximate Bayesian inference on synthetic datasets drawn from our prior."
+  },
+  {
+    "paper_id": "cp5PvcI6w8_",
+    "question": "What assumptions about data-generating mechanisms are encoded in TabPFN's prior?",
+    "answer": "The prior covers structural causal models and Bayesian neural networks, with higher likelihood assigned to simpler structures or models with fewer parameters.",
+    "page": 1,
+    "quote": "This prior incorporates ideas from causal reasoning: It entails a large space of structural causal models with a preference for simple structures."
+  },
+  {
+    "paper_id": "cp5PvcI6w8_",
+    "question": "How are test examples allowed to attend to the training examples in the illustrated TabPFN architecture?",
+    "answer": "In the illustrated attention mechanism, test samples attend only to training samples, while the training samples attend to one another.",
+    "page": 3,
+    "quote": "test samples x4 and x5 attend only to the training samples."
+  },
+  {
+    "paper_id": "cp5PvcI6w8_",
+    "question": "What speed and accuracy result does TabPFN report on its small numerical benchmark?",
+    "answer": "On 18 qualifying OpenML-CC18 datasets, it outperformed boosted trees and matched state-of-the-art AutoML performance with up to 230× speedup, rising to 5,700× on a GPU.",
+    "page": 1,
+    "quote": "On the 18 datasets in the OpenML-CC18 suite that contain up to 1 000 training data points, up to 100 purely numerical features without missing values, and up to 10 classes, we show that our method clearly outperforms boosted trees and performs on par with complex state-of-the-art AutoML systems with up to 230× speedup. This increases to a 5 700× speedup when using a GPU."
+  },
+  {
+    "paper_id": "cp5PvcI6w8_",
+    "question": "Which input types does the limitations section say are handled less well by the fitted TabPFN?",
+    "answer": "Its development focused on numerical data without missing values; performance is generally worse when categorical features or missing values are present.",
+    "page": 15,
+    "quote": "We also focused the development of TabPFN to purely numerical datasets without missing values, and while they can be applied to datasets with categorical features and/or missing values, their performance is generally worse."
+  },
+  {
+    "paper_id": "NAQvF08TcyG",
+    "question": "What is the core personalization idea in Textual Inversion?",
+    "answer": "Given only a few images of a user concept, it learns a new pseudo-word embedding in a frozen text-to-image model so that the word can be used in new natural-language prompts.",
+    "page": 1,
+    "quote": "Using only 3-5 images of a user-provided concept, like an object or a style, we learn to represent it through new “words” in the embedding space of a frozen text-to-image model."
+  },
+  {
+    "paper_id": "NAQvF08TcyG",
+    "question": "What objective is used to optimize the new concept embedding?",
+    "answer": "The embedding is directly optimized to minimize the latent-diffusion loss on images sampled from the small concept image set, using neutral text contexts to condition generation.",
+    "page": 4,
+    "quote": "We find v∗through direct optimization, by minimizing the LDM loss of Equation (1) over images sampled from the small set."
+  },
+  {
+    "paper_id": "NAQvF08TcyG",
+    "question": "Why does Textual Inversion preserve the pretrained generator's existing capabilities?",
+    "answer": "The learned pseudo-word is inserted at the text-embedding stage while the generative model itself remains untouched, retaining its learned language understanding and generalization.",
+    "page": 2,
+    "quote": "Importantly, this process leaves the generative model untouched. In doing so, we retain the rich textual understanding and generalization capabilities that are typically lost when fine-tuning vision and language models on new tasks."
+  },
+  {
+    "paper_id": "NAQvF08TcyG",
+    "question": "What concept coverage did the authors report without cherry-picking generated samples?",
+    "answer": "Without cherry-picking, the model successfully covered 55.4% of the tested concepts.",
+    "page": 17,
+    "quote": "Without cherry picking, our model can successfully capture 55.4% of tested con- cepts."
+  },
+  {
+    "paper_id": "NAQvF08TcyG",
+    "question": "What two practical limitations do the authors identify for Textual Inversion?",
+    "answer": "It may capture a concept’s semantic essence without reproducing precise shapes, and optimizing one concept takes roughly an hour.",
+    "page": 9,
+    "quote": "While our method offers increased freedom, it may still struggle with learning precise shapes, in- stead incorporating the “semantic” essence of a concept. For artistic creations, this is typically enough. Another limitation is lengthy optimization times. Learning a single concept requires roughly an hour."
+  },
+  {
+    "paper_id": "wCFB37bzud4",
+    "question": "How does Sequential Autoregressive Prompting (SAP) extend a bidirectional model's short generation?",
+    "answer": "SAP repeatedly prompts the model and appends only the first generated word to the prompt at each step, continuing until it emits a stop token.",
+    "page": 5,
+    "quote": "At each time step of iteration, we keep the first word generated (using the space character as delimiter) and concatenate it into the last line of the prompt to use in the next time step."
+  },
+  {
+    "paper_id": "wCFB37bzud4",
+    "question": "What model adaptation does SAP avoid compared with earlier ways to prompt bidirectional models?",
+    "answer": "SAP requires neither fine-tuning or weight updates nor a supervised instruction-tuning dataset.",
+    "page": 4,
+    "quote": "Unlike prior approaches to incorporate prompt-based learning capabilities into bidirectional models, our technique, SAP, neither requires fine-tuning, weight updates, nor supervised instruction-tuning datasets."
+  },
+  {
+    "paper_id": "wCFB37bzud4",
+    "question": "Across all 182 FLORES-101 language pairs, how did SAP's zero-shot result compare with its two-shot result?",
+    "answer": "The reported average spBLEU was 13.2 for zero-shot SAP versus 12.3 for two-shot SAP, so the zero-shot setup scored higher in this evaluation.",
+    "page": 8,
+    "quote": "mT53.7B + SAP (2-shot) 14.5 9.8 8.2 7.1 12.3 mT53.7B + SAP (zero-shot) 15.5 10.7 9.1 8.2 13.2"
+  },
+  {
+    "paper_id": "wCFB37bzud4",
+    "question": "What are the three stages of SAP's unsupervised translation bootstrap?",
+    "answer": "It generates synthetic translations from monolingual source text, filters them for quality, and self-amplifies by using the selected synthetic pairs as few-shot examples in successive rounds.",
+    "page": 7,
+    "quote": "The process, as depicted in Figure 2, consists of three steps: Step 1 (sampling): Generate synthetic parallel examples using a zero-shot translation prompt (with no examples) to translate sentences from a monolingual source language corpus. Step 2 (filtering): Filter out low-quality synthetic examples to keep only high-quality synthetic examples using an unsupervised scoring technique (discussed in Section 4.1). Step 3 (self-amplification): Translate any source language sentence desired using these synthetic parallel examples in the few-shot prompt."
+  },
+  {
+    "paper_id": "wCFB37bzud4",
+    "question": "Why is SAP a poor fit for long-generation tasks?",
+    "answer": "It makes one sequential forward pass per generated word, so long outputs require many serial model calls and become prohibitively expensive for practitioners.",
+    "page": 17,
+    "quote": "For longer generation tasks, we believe SAP is prohibitively computationally expensive and it likely would not be suitable for use by practitioners directly despite some evidence of improvements in performance."
+  }
+]

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.env
+data/
+.streamlit/secrets.toml
+.env.*
+!.env.example
+.evaluation-runtime/
+.DS_Store
+*.py[cod]
+*.pdf
+*.pptx
+*.mp4
+demo/*.png

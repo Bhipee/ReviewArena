@@ -1,0 +1,11 @@
+streamlit>=1.45,<2
+pymupdf>=1.25,<2
+duckdb>=1.2,<2
+pyarrow>=17
+scikit-learn>=1.5
+mcp>=1.12,<2
+requests>=2.31
+onnxruntime>=1.20
+tokenizers>=0.21
+json-repair>=0.30
+python-dotenv>=1,<2

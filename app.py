@@ -23,7 +23,7 @@ from reviewarena.library import document,list_documents,read_documents,save_docu
 st.set_page_config(page_title="ReviewArena",layout="wide")
 st.markdown("""<style>div[data-testid="stAppViewContainer"] .block-container{padding-top:2.4rem;max-width:1320px} [data-testid="stSidebar"]{background:#f1f3f1} h1,h2,h3{letter-spacing:-.035em} [data-testid="stMetricValue"]{color:#285b4f}</style>""",unsafe_allow_html=True)
 st.title("ReviewArena")
-activity=st.sidebar.radio("Workspace",["Manuscript review","Rebuttal","Lab meeting","Corpus"])
+activity=st.sidebar.radio("Workspace",["Manuscript review","Rebuttal","Lab meeting"])
 from reviewarena.model import local_endpoint
 endpoint=os.getenv('REVIEWARENA_API_URL','http://127.0.0.1:8766/v1')
 model_label=os.getenv('REVIEWARENA_MODEL','default_model')

@@ -22,8 +22,7 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as pw:
             label={'related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief'}[mode]
             page.get_by_text(label,exact=True).first.click()
             page.get_by_role('radio',name=label,exact=True).wait_for(state='attached')
-        switch=page.locator('.st-key-lab-demo-replay-'+mode)
-        switch.get_by_text('Inspect a saved public run',exact=True).click()
+        page.locator('.st-key-demo-lab-'+mode+' button').click()
         page.get_by_text('Download meeting notes',exact=True).wait_for()
         if page.locator('[data-testid="stException"]').count():raise RuntimeError(mode+' failed')
     saved('question')
@@ -52,10 +51,6 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as pw:
     assert 'human citation audit' in out.read_text()
 
     page.wait_for_timeout(3000)
-    page.locator('[data-testid="stSidebar"]').get_by_text('Corpus',exact=True).click()
-    panel=page.get_by_text('Related-work recommendation evaluation',exact=True)
-    panel.click();panel.scroll_into_view_if_needed();page.wait_for_timeout(3000)
-    assert not page.locator('[data-testid="stException"]').count()
     context.close();browser.close()
     output=ROOT/'ScholarMate_replay.mp4';temp=ROOT/'ScholarMate_recording.tmp.mp4'
     subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-v','error','-y','-i',str(video.path()),'-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',str(temp)],check=True)

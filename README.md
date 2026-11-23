@@ -120,6 +120,20 @@ The primary cohort keeps its original 50 submission IDs. Four initially download
 
 Pass PDF bytes or a local file path to `reviewarena.api.retrieve_candidates`, `verify`, `run_review` or `run_rebuttal`. Candidate results include the source claim, historical family, similarity, conditional-frequency numerator and denominator, and severity. The final review reuses that retrieval path. Rebuttal results include the source reviewer text, per-point actions, a prioritized experiment checklist and downloadable Markdown. A clarification requires manuscript evidence that answers the concern.
 
+### Demo buttons
+
+The main button runs the configured model. Click **Demo** beside it to display the locally saved output for the selected inputs. Running a main action successfully prepares a demo for those inputs. For paper summaries this includes the instructions and any example summaries and reference papers. A grey Demo button means the current inputs have no saved result.
+
+With the public project data available and the local model running, prepare the classroom examples ahead of time:
+
+    .venv/bin/python eval/prepare_workspace_demos.py
+
+In Manuscript review select **Efficient Dictionary Learning with Switch Sparse Autoencoders**, ICLR, and **2024-10-01**. In Rebuttal select the same paper and date and enable **Use an actual reviewer comment**. In Lab meeting select **Use the public research-group example** for the four meeting tasks, or **Use the public Auto-CoT paper** with the default instructions for Paper summary.
+
+To prepare a different PDF and review configuration, run the command below with the desired date. Add `--refresh` to regenerate its review with the current workflow. Generated action outputs are stored under `data/private/demos/` on the machine running ReviewArena.
+
+    .venv/bin/python eval/prepare_review_demo.py manuscript.pdf --venue ICLR --before 2024-10-01
+
 In Manuscript review, **Read claims and experimental settings** opens page-linked passages before the three reviewers run. Claims retain the authors’ wording. The separate limitations panel shows disclosures in the manuscript. The retrieval frequency counts distinct historical reviews in the matching cohort. Several mentions of the same family in one review contribute one count. Running the three reviewers in the same session reuses the reading after checking the PDF hash and all claim and setting passages.
 
 The product skills use the 2025 venue-specific score choices. The frozen study retains its original prompts and numeric scale. The official 2025 guides are linked in each reviewer skill.

@@ -255,8 +255,10 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
                     or concerns)
         if not candidates:
             summaries=[r['summary'] for r in reviewers if isinstance(r['summary'],str)]
-            selection=await ask("Extract the decisive substantive limitation from the reviewer summaries. "
-                                "Copy a supporting clause exactly as quote, or an empty quote if none exists.",
+            selection=await ask('Return exactly one JSON object with a single string field "quote". '
+                                'Copy a contiguous excerpt from one reviewer summary that states a substantive '
+                                'limitation supporting rejection. Preserve its capitalization and wording. '
+                                'If no summary states a limitation, return {"quote": ""}.',
                                 summaries=summaries)
             quote=selection.get('quote')
             if not isinstance(quote,str) or not quote.strip() or not any(quote in s for s in summaries):

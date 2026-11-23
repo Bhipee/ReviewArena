@@ -5,10 +5,14 @@ import sqlite3
 
 import streamlit as st
 
+from .demo_ui import action_buttons, remember_demo
+from .demos import demo_path, fingerprint, load_demo, summary_inputs
+from .kb import DATA
 from .library import document, read_documents
 from .paper_summary import DEFAULT_PROMPT, summarize
 from .summary_store import (
     history,
+    matching_summary,
     list_templates,
     load_template,
     save_summary,
@@ -74,6 +78,17 @@ def render_summary(files, selected, model_label):
         content = upload.getvalue()
         digest = hashlib.sha256(content).hexdigest()
         choices[f"{upload.name} [{digest[:8]}]"] = (upload.name, digest, content)
+    public_pdf = DATA / "iclr2023/5NTt8GFjUHkr.pdf"
+    if public_pdf.is_file() and st.checkbox("Use the public Auto-CoT paper"):
+        raw = public_pdf.read_bytes()
+        choices = {
+            "Auto-CoT · public example": (
+                public_pdf.name,
+                hashlib.sha256(raw).hexdigest(),
+                raw,
+            ),
+            **choices,
+        }
     target = st.selectbox(
         "Paper to summarize",
         list(choices),
@@ -142,10 +157,22 @@ def render_summary(files, selected, model_label):
     missing_reference = any(
         e.get("name") and e.get("content") is None for e in examples
     )
-    if st.button(
+    inputs = summary_inputs(choices[target][1], prompt, examples) if target else None
+    preview_key = "summary-preview-" + fingerprint(inputs)
+    archived = matching_summary(*inputs) if inputs else None
+    has_local = inputs is not None and demo_path("summary", inputs).is_file()
+    run, demo = action_buttons(
         "Generate and save summary",
+        "paper-summary",
+        available=archived is not None or has_local,
         disabled=not target or not valid or missing_reference,
-    ):
+    )
+    if demo:
+        st.session_state[preview_key] = (
+            archived if archived is not None else load_demo("summary", inputs)
+        )
+    if run:
+        st.session_state.pop(preview_key, None)
         try:
             with st.spinner("Summarizing paper…"):
                 paper_name, digest, content = choices[target]
@@ -161,11 +188,18 @@ def render_summary(files, selected, model_label):
                 saved = save_summary(
                     paper_name, digest, prompt, examples, model_label, output
                 )
+            remember_demo("summary", inputs, output)
             st.session_state["lab-summary-record"] = saved
             st.session_state["lab-summary-search"] = ""
-            st.success("Summary saved to local history.")
+            st.session_state[
+                "lab-summary-template-notice"
+            ] = "Summary saved to local history."
+            st.rerun()
         except Exception as exc:
             st.error(f"Could not generate and save the summary. {exc}")
+    if preview := st.session_state.get(preview_key):
+        st.caption("Demo · saved paper summary")
+        st.markdown(preview)
     render_history()
 
 

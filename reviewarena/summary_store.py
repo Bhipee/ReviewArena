@@ -69,6 +69,21 @@ def history(query="", path=HISTORY):
         ]
 
 
+def matching_summary(digest, prompt, example_pairs, path=HISTORY):
+    """Return the latest summary for exactly the same source, prompt and example sequence."""
+    if not path.is_file():
+        return None
+    with closing(sqlite3.connect(path)) as db:
+        for encoded, result in db.execute(
+            "SELECT examples, summary FROM summaries WHERE digest=? AND prompt=? ORDER BY id DESC",
+            (digest, prompt),
+        ):
+            pairs = [[e["summary"], e.get("digest")] for e in json.loads(encoded)]
+            if pairs == example_pairs:
+                return result
+    return None
+
+
 def list_templates(path=HISTORY):
     if not path.exists():
         return []

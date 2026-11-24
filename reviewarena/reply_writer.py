@@ -32,6 +32,10 @@ SLOT = re.compile(r"\[([^\[\]\n]{2,160})\]")
 
 async def compose_response(ask, paper, critique, evidence, step, history, *, action):
     instructions = {
+        'discussion': "Offer a reasoned perspective on the specific question. Explain a plausible mechanism, "
+                      "trade-off or boundary condition. Mark untested ideas as hypotheses. A conditional "
+                      "argument can stand on its own. Do not assign a revision, propose an experiment as a task, "
+                      "or imply that the manuscript has tested the idea.",
         'clarify': "Give the specific answer using manuscript evidence, then explain why it resolves the concern.",
         'revise': "Write the clarified definition, reasoning or limitation itself. If a fact needed to answer "
                   "is unavailable, put a specific fill-in field for that fact in square brackets.",
@@ -72,10 +76,12 @@ async def compose_response(ask, paper, critique, evidence, step, history, *, act
         if needs_slot and not any(any(c.isalpha() for c in slot) for slot in slots):
             inputs['correction'] = 'Insert a descriptive square-bracket field where the missing result or author clarification belongs.'
             continue
+        discussion_check = (" A clearly conditional scientific argument is allowed. Flag unsupported assertions "
+                            "about what the authors measured, found or changed." if action=='discussion' else "")
         check = await ask("Check only factual grounding of the author reply. Treat bracketed fields as "
                           "unknowns. Does the text outside the fields invent a finding, outcome direction, "
                           "measurement, or completed change? Ignore harmless restatements of the question. "
-                          "Return JSON with unsupported_quote (the exact unsupported text, or empty string).",
+                          "Return JSON with unsupported_quote (the exact unsupported text, or empty string)."+discussion_check,
                           draft=draft, reviewer_point=critique, manuscript_evidence=evidence)
         if check.get('unsupported_quote') == '':
             return draft.strip()
@@ -98,6 +104,8 @@ async def compose_response(ask, paper, critique, evidence, step, history, *, act
                 sentences.append(f"The comparison shows [measured {comparison.strip(' .:')}].")
             return ' '.join(sentences)
     # Leave outstanding facts visibly unfilled even if the model fails both checks.
+    if action == 'discussion':
+        return f"[Give the authors’ interpretation of this point and the assumptions it depends on: {critique}]"
     if action == 'experiment':
         return f"[Report the measurements for this comparison: {step.rstrip('.')}.] [State what those measurements establish about the reviewer’s question.]"
     if evidence and evidence.get('role') == 'addresses':

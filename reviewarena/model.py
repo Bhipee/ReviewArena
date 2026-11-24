@@ -1,11 +1,35 @@
+import asyncio
 import json
 import os
 import hashlib,tempfile
 from pathlib import Path
 import requests
+import time
+from . import diagnostics
 from urllib.parse import urlsplit
 from ipaddress import ip_address
 from json_repair import repair_json
+from urllib3.exceptions import InvalidHeader
+from urllib3.util import Retry
+
+
+async def bounded_model_map(items, operation, limit):
+    """Run independent model jobs with at most limit workers, preserving input order."""
+    results = [None] * len(items)
+    remaining = iter(enumerate(items))
+
+    async def worker():
+        for index, item in remaining:
+            results[index] = await operation(item)
+
+    workers = [asyncio.create_task(worker()) for _ in range(min(limit, len(items)))]
+    try:
+        await asyncio.gather(*workers)
+    finally:
+        for task in workers:
+            task.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+    return results
 
 def local_endpoint(url):
     host=urlsplit(url).hostname or ''
@@ -22,7 +46,25 @@ def model_post(url,**kwargs):
         kwargs['timeout']=(connect_timeout,float(os.getenv('REVIEWARENA_BATCH_TIMEOUT','900')))
     with requests.Session() as session:
         if local:session.trust_env=False
-        return session.post(url,**kwargs)
+        for attempt, backoff in enumerate((5, 10, None), start=1):
+            started=time.monotonic()
+            try:
+                response=session.post(url,**kwargs)
+            except requests.RequestException as exc:
+                diagnostics.event("model_transport_error", error=type(exc).__name__,
+                                  duration_s=round(time.monotonic()-started,3))
+                raise
+            diagnostics.model_response(response, started)
+            if response.status_code != 529 or backoff is None:
+                return response
+            try:
+                retry_after = Retry().get_retry_after(response)
+            except (InvalidHeader, ValueError, OverflowError):
+                retry_after = None
+            delay = max(backoff, retry_after or 0)
+            response.close()
+            diagnostics.event("model_retry", http_status=529, retry=attempt, wait_s=delay)
+            time.sleep(delay)
 
 def generate(task,payload,*,images=()):
     base=os.getenv("REVIEWARENA_API_URL","http://127.0.0.1:8766/v1").rstrip("/")
@@ -63,6 +105,8 @@ def generate(task,payload,*,images=()):
                 if isinstance(repaired,dict):parsed=repaired
         if isinstance(parsed,dict):
             return finish(parsed)
+        diagnostics.event("model_invalid_json", attempt=attempt+1, exhausted=exhausted,
+                          completion_tokens=used if isinstance(used,int) else None, max_tokens=budget)
         if attempt:
             detail=f"The response reached its {budget}-token limit." if exhausted else "The response contained no complete JSON object."
             raise ModelJSONError("Model returned invalid JSON twice. "+detail)

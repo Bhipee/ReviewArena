@@ -41,6 +41,11 @@ def workspace_style():
         }
         .st-key-decision {border-inline-start: 4px solid var(--ra-accent)}
         .st-key-decision:has(.st-key-reject) {border-inline-start-color: #bd574d}
+        .st-key-saved-demo-options [data-testid="stHorizontalBlock"]:has([class*="st-key-named-remove-"]) {
+            flex-wrap: nowrap; align-items: center;
+        }
+        .st-key-saved-demo-options [data-testid="stColumn"]:has([class*="st-key-named-option-"]) {flex: 1 1 0; min-width: 0}
+        .st-key-saved-demo-options [data-testid="stColumn"]:has([class*="st-key-named-remove-"]) {flex: 0 0 2.75rem; min-width: 2.75rem}
         [data-testid="stBaseButton-primary"] {background: #226254; border-color: #226254; color: white}
         [data-testid="stBaseButton-primary"]:hover {background: #194f43; border-color: #194f43}
         @media (max-width: 700px) {

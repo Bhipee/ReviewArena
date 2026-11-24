@@ -120,9 +120,9 @@ The primary cohort keeps its original 50 submission IDs. Four initially download
 
 Pass PDF bytes or a local file path to `reviewarena.api.retrieve_candidates`, `verify`, `run_review` or `run_rebuttal`. Candidate results include the source claim, historical family, similarity, conditional-frequency numerator and denominator, and severity. The final review reuses that retrieval path. Rebuttal results include the source reviewer text, per-point actions, a prioritized experiment checklist and downloadable Markdown. A clarification requires manuscript evidence that answers the concern.
 
-### Demo buttons
+### ForDemo
 
-The main button runs the configured model. Click **Demo** beside it to display the locally saved output for the selected inputs. Running a main action successfully prepares a demo for those inputs. For paper summaries this includes the instructions and any example summaries and reference papers. A grey Demo button means the current inputs have no saved result.
+The main workspace runs the configured model. Open the collapsed **ForDemo** panel to select public examples and load saved outputs for the current inputs. In Manuscript review, historical retrieval details and the published decision are also available there. Running a main action successfully prepares a demo for those inputs. For paper summaries this includes the instructions and any example summaries and reference papers. A disabled replay button means no saved result is available for those inputs.
 
 With the public project data available and the local model running, prepare the classroom examples ahead of time:
 

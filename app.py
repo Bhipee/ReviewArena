@@ -16,16 +16,31 @@ from reviewarena.claims import declared_limitations
 from reviewarena.comparison_reader import inspect_comparison
 from reviewarena.workflow import ask
 from reviewarena.lab import run_lab,meeting_markdown
-from reviewarena.demo_ui import action_buttons,remember_demo
+from reviewarena.demo_ui import action_buttons,remember_demo,workspace_style
 from reviewarena.demos import chair_inputs,demo_path,fingerprint,load_demo,public_lab_result,read_review_demo,read_scope_demo,review_demo_path
 from reviewarena.summary_ui import render_summary
 from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes
 from reviewarena.library import document,list_documents,read_documents,save_documents,saved_pdf
 
 st.set_page_config(page_title="ReviewArena",layout="wide")
-st.markdown("""<style>div[data-testid="stAppViewContainer"] .block-container{padding-top:2.4rem;max-width:1320px} [data-testid="stSidebar"]{background:#f1f3f1} h1,h2,h3{letter-spacing:-.035em} [data-testid="stMetricValue"]{color:#285b4f}</style>""",unsafe_allow_html=True)
-st.title("ReviewArena")
+workspace_style()
+with st.sidebar.container(key="brand"):
+    st.markdown("ReviewArena")
 activity=st.sidebar.radio("Workspace",["Manuscript review","Rebuttal","Lab meeting"])
+st.title(activity)
+purpose={
+    "Manuscript review":"Review your draft, see the area chair’s recommendation and check the evidence behind it.",
+    "Rebuttal":"Draft a response to each reviewer comment and identify the revisions it needs.",
+    "Lab meeting":"Ask questions across lab papers, summarize a paper or prepare a meeting brief.",
+}
+st.write(purpose[activity])
+inputs_panel=st.container(key="workspace-inputs")
+with st.container(key="demo-panel"):
+    demo_panel=st.expander(":material/science: ForDemo",expanded=False)
+demo_panel.caption("Choose a public example, load saved results or inspect diagnostic records. Loading a saved result does not call the model.")
+demo_inputs=demo_panel.container()
+demo_actions=demo_panel.container()
+demo_trace=demo_panel.container()
 from reviewarena.model import local_endpoint
 endpoint=os.getenv('REVIEWARENA_API_URL','http://127.0.0.1:8766/v1')
 model_label=os.getenv('REVIEWARENA_MODEL','default_model')
@@ -48,7 +63,8 @@ def manifest(year):
     path=DATA/f'iclr{year}/manifest.json'
     return json.loads(path.read_text()) if path.exists() else []
 def show_evidence(content,ev):
-    st.markdown(f"**Page {ev['page']}** · {ev.get('reason','')}")
+    st.caption(f"Manuscript evidence · p. {ev['page']}")
+    if ev.get("reason"):st.write(ev["reason"])
     st.write(ev['quote'])
     st.image(highlight(content,ev['page'],ev['quote']),width=600)
 def render_comparisons(content,reading):
@@ -516,9 +532,9 @@ if activity=="Corpus":
                     st.caption("Each count is a distinct published concern for one manuscript and method. Each pair uses two different PDFs, the same review protocol and the same published reviewer concerns.")
     st.stop()
 if activity=="Lab meeting":
-    st.header("Research group workspace")
-    files=st.file_uploader("Group papers and meeting notes",type=['pdf','txt','md'],accept_multiple_files=True)
-    if files and st.button("Save uploads to local lab library"):
+    inputs_panel.subheader("Meeting materials")
+    files=inputs_panel.file_uploader("Group papers and meeting notes",type=['pdf','txt','md'],accept_multiple_files=True)
+    if files and inputs_panel.button("Save uploads to local lab library"):
         try:
             save_documents([(f.name,f.getvalue()) for f in files])
             st.success("Saved to this computer’s lab library.")
@@ -526,16 +542,17 @@ if activity=="Lab meeting":
     if saved_name:=st.session_state.pop("new-meeting-record",None):
         st.success(f"Decision saved. Select {saved_name} for the next brief.")
     library=list_documents()
-    selected=st.multiselect("Saved lab documents",library,format_func=lambda item:f"{item[0]} · {item[1][:8]}") if library else []
+    selected=inputs_panel.multiselect("Saved lab documents",library,format_func=lambda item:f"{item[0]} · {item[1][:8]}") if library else []
     task_names={'question':'Q&A','related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief','summary':'Paper summary'}
-    mode=st.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
+    inputs_panel.subheader("Meeting task")
+    mode=inputs_panel.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
     if mode=='summary':
-        render_summary(files,selected,model_label)
+        render_summary(files,selected,model_label,demo_inputs,demo_actions)
         st.stop()
-    use_demo=st.checkbox("Use the public research-group example")
+    use_demo=demo_inputs.checkbox("Use the public research-group example",key="lab-public-example")
     public_path=DATA/'lab-replays'/(mode+'.json')
     public=json.loads(public_path.read_bytes()) if use_demo and public_path.is_file() else None
-    q=st.text_area("Question or meeting topic",value=public['question'] if public else "",
+    q=inputs_panel.text_area("Question or meeting topic",value=public['question'] if public else "",
                    key=f"lab-topic-{mode}-{use_demo}")
     sources={f"{name} [{digest[:8]}]":digest for name,digest in selected}
     for upload in files:
@@ -554,17 +571,18 @@ if activity=="Lab meeting":
             if notes:demo_note=DATA/next(iter(notes.values()))['path']
             if demo_note.is_file():sources[demo_note.name]=hashlib.sha256(demo_note.read_bytes()).hexdigest()
     names=list(sources)
-    manuscript=st.selectbox("Draft to check for related work",names) if mode=='related-work-gap' and names else None
+    manuscript=inputs_panel.selectbox("Draft to check for related work",names) if mode=='related-work-gap' and names else None
     meeting_records=[]
     if mode=='weekly-brief' and names:
-        meeting_records=st.multiselect("Meeting records documenting group work",names,
+        meeting_records=inputs_panel.multiselect("Meeting records documenting group work",names,
             default=[n for n in names if n.rsplit(' [',1)[0].lower().endswith(('.md','.txt'))],
             help="Select the records for a group progress meeting. Leave this empty for a literature discussion.")
     lab_inputs=[mode,q,sources,manuscript,sorted(meeting_records)]
     labkey="lab-"+fingerprint(lab_inputs)
     public_result=public_lab_result(public,lab_inputs) if public else None
     has_local=demo_path('lab',lab_inputs).is_file()
-    live,demo=action_buttons("Prepare answer","lab-"+mode,available=has_local or public_result is not None,
+    actions={'question':'Answer question','related-work-gap':'Find related work','reviewer-2':'Review selected papers','weekly-brief':'Prepare weekly brief'}
+    live,demo=action_buttons(actions[mode],"lab-"+mode,demo_panel=demo_actions,demo_label="Load saved "+task_names[mode],live_panel=inputs_panel,primary=True,available=has_local or public_result is not None,
                              disabled=not names or not q.strip())
     if demo:
         st.session_state[labkey]=load_demo('lab',lab_inputs) if has_local else public_result
@@ -587,12 +605,13 @@ if activity=="Lab meeting":
             st.rerun()
     if result:=st.session_state.get(labkey):
         if st.session_state.get(labkey+'-demo'):st.caption("Demo · saved lab meeting result")
+        st.subheader({"question":"Answer and sources","related-work-gap":"Related work to inspect","reviewer-2":"Reviewer feedback","weekly-brief":"Weekly meeting brief"}[mode])
         uploads={f"{f.name} [{hashlib.sha256(f.getvalue()).hexdigest()[:8]}]":f for f in files if f.name.lower().endswith('.pdf')}
         stored={f"{n} [{d[:8]}]":d for n,d in selected if n.lower().endswith('.pdf')}
         demo_files={i+'.pdf' for i in demo_ids}
         for point_number,p in enumerate(result['points']):
             if heading:=p.get('heading'):
-                st.subheader(heading)
+                st.markdown("**"+heading+"**")
             if p['sources']:
                 st.write(p['text'])
             else:
@@ -638,18 +657,30 @@ if activity=="Lab meeting":
                     st.rerun()
                 else:st.info("Enter the agreed decision before saving.")
 
-        with st.expander("Tool calls"):st.json(result['tools'])
+        with demo_trace.expander("Lab tool calls"):st.json(result['tools'])
     st.stop()
 samples=sorted(manifest(2025),key=lambda r:(r["id"]!="k2ZVAzVeMP",r["title"]))
-selection=st.sidebar.selectbox("Manuscript",["Upload a PDF"]+[r['title'] for r in samples],key="current_manuscript")
+def select_manuscript(title):
+    st.session_state["current_manuscript"]=title
+
+featured=next((r['title'] for r in samples if r['id']=='k2ZVAzVeMP'),None)
+if featured and st.session_state.get("current_manuscript")!=featured:
+    demo_inputs.button("Use Switch SAE example",on_click=select_manuscript,args=(featured,))
+
+selection=demo_inputs.selectbox("Public example manuscript",["Upload a PDF"]+[r['title'] for r in samples],
+    format_func=lambda title:"Use my uploaded PDF" if title=="Upload a PDF" else title,key="current_manuscript")
 sample=next((r for r in samples if r['title']==selection),None)
-if sample and sample.get('version'):st.caption(sample['version'])
-if sample and sample.get('timing_audit')=='PDF created on or after first review':
-    st.caption("This PDF was generated after reviewing began. It may contain revisions responding to feedback.")
-if sample:content=(DATA/'iclr2025'/(sample['id']+'.pdf')).read_bytes()
+if sample:
+    content=(DATA/'iclr2025'/(sample['id']+'.pdf')).read_bytes()
+    inputs_panel.caption("Public example manuscript")
+    inputs_panel.subheader(sample['title'])
+    demo_inputs.button("Use my own PDF",on_click=select_manuscript,args=("Upload a PDF",))
+    if sample.get('version'):demo_inputs.caption(sample['version'])
+    if sample.get('timing_audit')=='PDF created on or after first review':
+        demo_inputs.caption("This example PDF was generated after reviewing began and may contain revisions.")
 else:
-    f=st.file_uploader("Manuscript PDF",type="pdf")
-    if not f:st.info("Upload a manuscript or select a public paper in the sidebar. For the prepared demo, choose Efficient Dictionary Learning with Switch Sparse Autoencoders.");st.stop()
+    f=inputs_panel.file_uploader("Upload your manuscript",type="pdf",key="uploaded-manuscript")
+    if not f:st.stop()
     content=f.getvalue()
 try:paper=parse_pdf(content)
 except Exception as exc:st.error(str(exc));st.stop()
@@ -659,14 +690,15 @@ if activity=="Manuscript review":
     st.session_state['last_review_venue']=venue
 cutoff=st.sidebar.date_input("Prior work published before",value=date(2024,10,1) if sample else date.today())
 if activity=="Rebuttal":
-    st.header("Rebuttal workbench")
+    inputs_panel.subheader("Reviewer comments")
     if sample:paper['title']=sample['title']
     example=""
     if sample:
         truth_path=DATA/'truth-labels'/(sample['id']+'.json')
-        if truth_path.exists() and st.checkbox("Use an actual reviewer comment"):
+        if truth_path.exists() and demo_inputs.checkbox("Use an actual reviewer comment"):
             example=json.loads(truth_path.read_text())[0]['quote']
-    text=st.text_area("Paste reviewer comments",value=example)
+    text=inputs_panel.text_area("Paste reviewer comments",value=example,key=f"reviewer-comments-{paper['hash']}-{bool(example)}")
+    reply_action,works_action=inputs_panel.columns([1,1])
     replay_file=DATA/'rebuttal-replays'/(paper['hash']+'-'+hashlib.sha256(text.encode()).hexdigest()+'.json')
     comment_hash=hashlib.sha256(text.encode()).hexdigest()
     rkey=f"rebuttal-{paper['hash']}-{cutoff}-{comment_hash}"
@@ -680,7 +712,7 @@ if activity=="Rebuttal":
     reply_inputs=[paper['hash'],comment_hash]
     works_inputs=[*reply_inputs,cutoff.isoformat()]
     run_works,show_works=action_buttons("Check works mentioned by the reviewer","rebuttal-works",
-        available=demo_path('works',works_inputs).is_file(),disabled=not text.strip())
+        demo_panel=demo_actions,demo_label="Load saved reference check",live_panel=works_action,available=demo_path('works',works_inputs).is_file(),disabled=not text.strip())
     if run_works or show_works:
         reading=(load_demo('works',works_inputs) if show_works else call(inspect_comparison(paper,text,cutoff.isoformat(),ask)))
         st.session_state['works-'+rkey]=reading
@@ -690,9 +722,10 @@ if activity=="Rebuttal":
             st.rerun()
     if reading:=st.session_state.get('works-'+rkey):
         if st.session_state.get('works-demo-'+rkey):st.caption("Demo · saved comparison check")
-        render_comparisons(content,reading)
+        with st.expander("Reference check results"):
+            render_comparisons(content,reading)
     run_reply,show_reply=action_buttons("Draft point-by-point reply","rebuttal-reply",
-        available=demo_path('reply',reply_inputs).is_file() or replay_file.is_file(),disabled=not text.strip())
+        demo_panel=demo_actions,demo_label="Load saved rebuttal draft",live_panel=reply_action,primary=True,available=demo_path('reply',reply_inputs).is_file() or replay_file.is_file(),disabled=not text.strip())
     if run_reply or show_reply:
         if run_reply:
             reply=call(rebuttal(paper,text))
@@ -709,22 +742,29 @@ if activity=="Rebuttal":
         if run_reply and reply:st.rerun()
     if result:=st.session_state.get(rkey):
         if st.session_state.get('reply-demo-'+rkey):st.caption('Demo · saved rebuttal draft')
-        for item in result['responses']:
-            a=item['answer'];st.subheader(item['critique'])
-            st.caption(' · '.join(s for s in (item.get('category'),a['action'].capitalize()) if s))
-            if 'next_step' in a:
-                if source:=a.get('existing_evidence'):
-                    st.markdown("**Existing manuscript evidence**")
-                    st.write(source['quote'])
-                    st.caption(f"Page {source['page']} · {source.get('role','')}")
+        st.subheader("Point-by-point response")
+        st.download_button("Download rebuttal draft",rebuttal_markdown(result["responses"]),"rebuttal.md")
+        for number,item in enumerate(result['responses'],1):
+            a=item['answer']
+            st.divider()
+            st.markdown(f"**Reviewer point {number}**")
+            st.write(item['critique'])
+            st.badge(a['action'].capitalize(),color="blue")
+            st.markdown("**Response to reviewer**")
+            st.write(a['draft'])
+            if a.get('next_step'):
                 st.markdown("**Suggested next step**")
                 st.write(a['next_step'])
-                st.markdown("**Response to reviewer**")
-            st.write(a['draft'])
-            for name,counts in item.get('strategy_outcomes',{}).items():
-                linked=[h for h in item['history'] if h.get('reply_strategy')==name]
-                replies=len({h['reply_id'] for h in linked if h.get('reply_id')})
-                st.caption(f"{name.capitalize()} · Distinct replies: {replies} · Linked concerns: {len(linked)} · Concerns with a documented outcome: {counts['known_outcomes']} · Recorded as resolved: {counts['resolved']}")
+            if source:=a.get('existing_evidence'):
+                st.markdown("**Existing manuscript evidence**")
+                st.write(source['quote'])
+                st.caption(f"Page {source['page']} · {source.get('role','')}")
+            if item.get('strategy_outcomes'):
+                with demo_trace.expander(f"Historical response strategies · point {number}"):
+                    for name,counts in item.get('strategy_outcomes',{}).items():
+                        linked=[h for h in item['history'] if h.get('reply_strategy')==name]
+                        replies=len({h['reply_id'] for h in linked if h.get('reply_id')})
+                        st.caption(f"{name.capitalize()} · Distinct replies: {replies} · Linked concerns: {len(linked)} · Concerns with a documented outcome: {counts['known_outcomes']} · Recorded as resolved: {counts['resolved']}")
             with st.expander("Manuscript evidence and previous responses"):
                 for ev in item['evidence']:show_evidence(content,ev)
                 for h in item['history']:
@@ -743,18 +783,15 @@ if activity=="Rebuttal":
                         state='resolved' if h['resolved'] else 'unresolved'
                         st.caption(f"Reviewer wording for the recorded outcome · {state}")
                         st.write(h['resolution_quote'])
-        st.subheader("Experiment checklist")
         steps=experiment_checklist(result['responses'])
+        if steps:st.subheader("Experiment checklist")
         for a in steps:
             action=f"Priority {a.get('priority','unassigned')} · effort {a.get('effort','to estimate')} · {a['experiment']}"
             st.write(action)
-        st.download_button("Download Markdown",rebuttal_markdown(result["responses"]),"rebuttal.md")
+
     st.stop()
 key=f"{paper['hash']}-{venue}-{cutoff}"
-st.header(sample['title'] if sample else f.name)
-if paper.get('sections'):
-    with st.expander("Manuscript sections"):
-        st.dataframe([{'Section':s['heading'],'First page':s['start_page'],'Last page':s['end_page']} for s in paper['sections']],hide_index=True)
+run_panel,read_panel=inputs_panel.columns([1,1])
 scope_key='scope-'+paper['hash']
 scope=st.session_state.get(scope_key)
 review_inputs=[paper['hash'],venue,cutoff.isoformat()]
@@ -763,7 +800,7 @@ saved_scope=read_scope_demo(paper['hash'],saved_review_path,venue,cutoff.isoform
 reading_job='reading-'+paper['hash']
 future=st.session_state.get(reading_job)
 read_live,read_demo=action_buttons("Read claims and experimental settings","manuscript-reading",
-    available=saved_scope is not None,disabled=future is not None)
+    live_panel=read_panel,demo_panel=demo_actions,demo_label="Load saved manuscript reading",available=saved_scope is not None,disabled=future is not None)
 if read_demo:
     scope=st.session_state[scope_key]=saved_scope
     st.session_state[scope_key+'-demo']=True
@@ -793,12 +830,9 @@ if read_live or future is not None:
         reading_progress()
 if reading_error:=st.session_state.pop(reading_job+'-error',None):
     st.error(f"The manuscript reading could not finish. {reading_error}")
-if scope is not None:
-    if st.session_state.get(scope_key+"-demo"):st.caption("Demo · saved manuscript reading")
-    render_scope(content,scope)
 jobkey="job-"+key
 job=st.session_state.get(jobkey)
-run_live,run_demo=action_buttons("Run three reviewers","manuscript-review",available=saved_review_path is not None,
+run_live,run_demo=action_buttons("Run three reviewers","manuscript-review",live_panel=run_panel,demo_panel=demo_actions,demo_label="Load saved review",available=saved_review_path is not None,
     disabled=job is not None,primary=True)
 if run_demo:
     st.session_state.pop(key+'-chair-demo',None)
@@ -845,17 +879,13 @@ if error:=st.session_state.pop(jobkey+'-error',None):st.error(error)
 result=st.session_state.get(key)
 if result:
     if st.session_state.get(key+"-demo"):
-        st.caption("Demo · saved reviewer reports")
+        st.badge("Saved example review",icon=":material/history:",color="violet")
     else:
         st.progress(1.0,text="Review complete · 3/3 reviewers finished")
     rubric=result.get('rubric') or {}
     labels={str(k):v for k,v in rubric.get('score_labels',{}).items()}
     if not labels and rubric.get('year')==2025:
         labels={str(k):v for k,v in SCORE_LABELS.get(result['venue'],{}).items()}
-    if rubric:
-        scale=' · '.join(f"{x} {labels.get(str(x),'')}".strip() for x in rubric['scores'])
-        st.caption(f"{result['venue']} {rubric['year']} reviewer scale · {scale}")
-        st.link_button("Venue review guide",rubric['source'])
     st.subheader("Area chair recommendation")
     meta=result['meta_review']
     if st.session_state.get(key+'-chair-demo'):st.caption("Demo · saved area chair recommendation")
@@ -863,7 +893,7 @@ if result:
         chair_key=chair_inputs(review_inputs,result)
         saved_chair=load_demo('chair',chair_key)
         run_chair,show_chair=action_buttons(f"Generate AC recommendation with {model_label}","manuscript-chair",
-            available=saved_chair is not None)
+            demo_panel=demo_actions,demo_label="Load saved chair recommendation",available=saved_chair is not None)
         if run_chair or show_chair:
             revised=saved_chair if show_chair else call(chair_recommendation(result['venue'],result['reviews'],
                 result.get('claims'),decision=meta.get('recommendation'),novelty=result.get('contribution_comparisons'),
@@ -874,25 +904,79 @@ if result:
                 st.session_state[key+'-chair-demo']=show_chair
                 if run_chair:remember_demo('review',review_inputs,result)
                 st.rerun()
-    if meta.get('recommendation') in ('Accept','Reject'):
-        st.markdown(f"**{meta['recommendation']}** · simulated decision")
-    elif meta.get("error"):
-        st.warning(meta["error"])
-    else:
-        st.caption("This earlier review contains a synthesis only.")
-    if meta.get('rationale_version')==2:
-        label='Why accept' if meta['recommendation']=='Accept' else 'Why reject'
-        st.markdown(f'**{label}**')
-        st.write(meta['impact'])
-        finding=meta['decisive_finding']
-        pages=', '.join(map(str,finding['pages']))
-        st.caption('Supporting evidence'+(f' · p. {pages}' if pages else ''))
-        st.write(finding['statement'])
-    else:
-        st.write(meta.get('summary',''))
+    with st.container(border=True,key="decision"):
+        if meta.get('recommendation') in ('Accept','Reject'):
+            accepted=meta['recommendation']=='Accept'
+            with st.container(key='accept' if accepted else 'reject'):
+                icon="check_circle" if accepted else "cancel"
+                color="green" if accepted else "red"
+                st.markdown(f"### :{color}[:material/{icon}: {meta['recommendation']}]")
+                st.caption(f"Simulated decision · {result['venue']}")
+        elif meta.get("error"):
+            st.warning(meta["error"])
+        else:
+            st.caption("This earlier review contains a synthesis only.")
+        if meta.get('rationale_version')==2:
+            label='Why accept' if meta['recommendation']=='Accept' else 'Why reject'
+            st.markdown(f'**{label}**')
+            st.write(meta['impact'])
+            finding=meta['decisive_finding']
+            pages=', '.join(map(str,finding['pages']))
+            st.caption('Supporting evidence'+(f' · p. {pages}' if pages else ''))
+            st.write(finding['statement'])
+        else:
+            st.write(meta.get('summary',''))
+    questions=author_questions(paper,result['checked'])
+    if questions:
+        with st.container(key="author-followup"), st.expander(f"Open questions for the authors ({len(questions)})",icon=":material/pending_actions:"):
+            st.caption("Add a page reference, clarify a claim or record a revision. These questions remain open after the manuscript check.")
+            scope_id=hashlib.sha256(json.dumps(questions,sort_keys=True).encode()).hexdigest()
+            notes_key=key+'-author-questions-'+scope_id
+            if demo_trace.button("Compare question wording with historical reviews",key=notes_key+'-rank'):
+                from reviewarena.question_alignment import source_ranks
+                candidates=[item['candidate'] for item in result['checked']]
+                st.session_state[notes_key+'-ranks']={(candidates[i]['target_question'],candidates[i]['source']):rank
+                                                     for i,rank in source_ranks(candidates).items()}
+            if paper.get('captions'):
+                if st.button("Find figures and tables for these questions",key=notes_key+'-find'):
+                    from reviewarena.verifier import find_captions
+                    st.session_state[notes_key+'-captions']=find_captions(paper,[row['question'] for row in questions])
+                for row,hits in zip(questions,st.session_state.get(notes_key+'-captions',[])):
+                    st.write(row['question'])
+                    for caption in hits:
+                        with st.expander(f"{caption['label']} · p. {caption['page']}"):
+                            show_evidence(content,dict(caption,reason='Retrieved caption for manual inspection'))
+                    row['captions']=hits
+            with st.form(notes_key):
+                meeting_notes=[]
+                for row in questions:
+                    st.write(row['question'])
+                    st.caption(f"Manuscript p. {row['page']} · "+row['claim'])
+                    for passage in row['evidence']:
+                        st.caption(f"Partial answer, p. {passage['page']} · "+passage['quote'])
+                    if rank:=st.session_state.get(notes_key+'-ranks',{}).get((row['question'],row['source'])):
+                        row['source_rank']=rank
+                        with demo_trace.expander("Question wording · "+row['question']):
+                            st.write(row["question"])
+                            st.caption("Retrieved reviewer quotation")
+                            st.write(row['source_quote'])
+                            if rank.get('historical_question'):
+                                st.caption('Historical question used for retrieval · '+rank['historical_question'])
+                            st.caption(f"The assigned historical question ranks {rank['rank']} of {rank['compared']} when the proposed question is searched against this manuscript's retrieved candidates. Closest category: {rank['closest_category']}.")
+                    st.markdown("[Historical reviewer comment]("+row['source']+")")
+                    note_key=key+'-author-note-'+hashlib.sha256(row['question'].encode()).hexdigest()
+                    note=st.text_area("Evidence or revision decision",key=note_key,placeholder="Record a page, experiment or action for the next draft.")
+                    meeting_notes.append(dict(row,note=note))
+                prepare=st.form_submit_button("Prepare author notes")
+            if prepare:
+                st.session_state[notes_key+'-prepared']=author_question_notes(
+                    meeting_notes,manuscript=sample['title'] if sample else f.name,pdf_sha256=paper['hash'])
+            if prepared:=st.session_state.get(notes_key+'-prepared'):
+                st.download_button("Download prepared author notes",prepared,f"author-questions-{paper['hash'][:12]}.md",on_click="ignore")
+    st.subheader("Reviewer assessments")
     for col,r in zip(st.columns(3),result['reviews']):
         with col.container(border=True):
-            st.subheader(r['role'])
+            st.markdown('**'+r['role']+'**')
             report=r['report']
             score=report.get('score')
             if score is None:
@@ -900,7 +984,9 @@ if result:
                 if report.get('summary')=='No supported concerns assigned to this reviewer.':
                     score='Unrated · no verified concern assigned'
             label=labels.get(str(score))
-            st.caption(f"Score · {score} ({label})" if label else f"Score · {score}")
+            tone={"Strong accept":"green","Accept":"green","Strong reject":"red","Reject":"red",
+                  "Borderline accept":"orange","Borderline reject":"orange"}.get(label,"gray")
+            st.badge(f"Score {score} · {label}" if label else f"Score {score}",color=tone,icon=":material/assessment:")
             st.write(report.get('summary',''))
             if report.get('score_rationale'):st.write(report['score_rationale'])
             if check:=report.get('rating_check'):
@@ -909,7 +995,7 @@ if result:
                         st.caption(f"Page {passage['page']}")
                         st.write(passage['quote'])
             if 'investigation' in report:
-                with st.expander("Reviewer investigation"):
+                with demo_trace.expander("Investigation log · "+r['role']):
                     if not report['investigation']:
                         st.caption("No additional tool calls recorded.")
                     for step in report['investigation']:
@@ -921,7 +1007,7 @@ if result:
                             else:
                                 st.caption(f"Page {observation['page']}")
                             st.write(observation['quote'])
-            with st.expander("Read review"):
+            with st.expander("Criteria and full review"):
                 if grades:=report.get('criteria'):
                     for criterion,value in grades.items():
                         st.write(criterion.capitalize()+' · '+(f'{value}/4' if value is not None else 'Unrated'))
@@ -929,8 +1015,14 @@ if result:
                     if report.get(field):
                         st.markdown('**'+field.capitalize()+'**')
                         render_text(report[field])
+    if rubric:
+        with st.expander("Score definitions and venue guide"):
+            scale=' · '.join(f"{x} {labels.get(str(x),'')}".strip() for x in rubric['scores'])
+            st.caption(f"{result['venue']} {rubric['year']} reviewer scale · {scale}")
+            st.link_button("Venue review guide",rubric['source'])
+    st.subheader("Manuscript evidence")
     if result.get('method')=='D' and 'contribution_comparisons' in result:
-        with st.expander("Originality and prior work",expanded=True):
+        with st.expander("Originality and prior work",icon=":material/compare_arrows:"):
             if value:=result.get('research_value'):
                 st.markdown("**Research value**")
                 st.write(value['value'])
@@ -939,7 +1031,9 @@ if result:
             if not comparisons:
                 st.caption("No page-grounded contribution available for comparison.")
             for row in comparisons:
-                st.markdown(f"**Page {row['page']} · {row['status'].replace('_',' ')}**")
+                status=row['status'].replace('_',' ')
+                st.badge(status.capitalize(),color="gray" if status=="Insufficient evidence" else "blue")
+                st.caption(f"Manuscript claim · p. {row['page']}")
                 st.write(row['claim'])
                 if row.get('comparison'):st.write(row['comparison'])
                 if row.get('title'):
@@ -964,186 +1058,165 @@ if result:
                 elif row['status']=='Insufficient evidence':
                     st.caption("The available passages did not establish a specific relationship for this claim.")
             if 'prior_searches' in result:
-                with st.expander("Literature searches"):
+                with demo_trace.expander("Literature searches"):
                     for search in result['prior_searches']:
                         outcome=(f"{search['matches']} matching records" if search['status']=='complete' else "Catalog unavailable")
                         st.write(f"{search['kind'].capitalize()} · {search['query']} · {outcome}")
     if conflicts:=result.get('manuscript_conflicts'):
-        with st.expander("Manuscript consistency checks",expanded=True):
+        with st.expander("Manuscript consistency checks",icon=":material/fact_check:"):
             for finding in conflicts:
                 st.write(finding['issue'])
                 for source in finding['evidence']:
                     st.caption(f"Page {source['page']}")
                     st.write(source['quote'])
     if examples:=result.get('comparison_reviews'):
-        with st.expander("Historical OpenReview comparisons"):
+        with demo_trace.expander("Historical OpenReview comparisons"):
             for item in examples:
                 st.link_button(item['venue']+' · '+item['title'],item['source'])
                 st.write(item['review_excerpt'])
-    if scope is None:
-        render_scope(content,result)
-    questions=author_questions(paper,result['checked'])
-    if questions:
-        with st.expander(f"Open questions for the authors ({len(questions)})"):
-            st.caption("The verifier could not fully resolve these questions. Record the evidence or revision decision for each one.")
-            scope_id=hashlib.sha256(json.dumps(questions,sort_keys=True).encode()).hexdigest()
-            notes_key=key+'-author-questions-'+scope_id
-            if st.button("Compare question wording with historical reviews",key=notes_key+'-rank'):
-                from reviewarena.question_alignment import source_ranks
-                candidates=[item['candidate'] for item in result['checked']]
-                st.session_state[notes_key+'-ranks']={(candidates[i]['target_question'],candidates[i]['source']):rank
-                                                     for i,rank in source_ranks(candidates).items()}
-            if paper.get('captions'):
-                if st.button("Find figures and tables for these questions",key=notes_key+'-find'):
-                    from reviewarena.verifier import find_captions
-                    st.session_state[notes_key+'-captions']=find_captions(paper,[row['question'] for row in questions])
-                for row,hits in zip(questions,st.session_state.get(notes_key+'-captions',[])):
-                    st.write(row['question'])
-                    for caption in hits:
-                        with st.expander(f"{caption['label']} · p. {caption['page']}"):
-                            show_evidence(content,dict(caption,reason='Retrieved caption for manual inspection'))
-                    row['captions']=hits
-            with st.form(notes_key):
-                meeting_notes=[]
-                for row in questions:
-                    st.write(row['question'])
-                    st.caption(f"Manuscript p. {row['page']} · "+row['claim'])
-                    for passage in row['evidence']:
-                        st.caption(f"Partial answer, p. {passage['page']} · "+passage['quote'])
-                    if rank:=st.session_state.get(notes_key+'-ranks',{}).get((row['question'],row['source'])):
-                        row['source_rank']=rank
-                        st.write("Retrieved reviewer quotation")
-                        st.write(row['source_quote'])
-                        if rank.get('historical_question'):
-                            st.caption('Historical question used for retrieval · '+rank['historical_question'])
-                        st.caption(f"The assigned historical question ranks {rank['rank']} of {rank['compared']} when the proposed question is searched against this manuscript's retrieved candidates. Closest category: {rank['closest_category']}.")
-                    st.markdown("[Historical reviewer comment]("+row['source']+")")
-                    note_key=key+'-author-note-'+hashlib.sha256(row['question'].encode()).hexdigest()
-                    note=st.text_area("Evidence or revision decision",key=note_key,placeholder="Record a page, experiment or action for the next draft.")
-                    meeting_notes.append(dict(row,note=note))
-                prepare=st.form_submit_button("Prepare author notes")
-            if prepare:
-                st.session_state[notes_key+'-prepared']=author_question_notes(
-                    meeting_notes,manuscript=sample['title'] if sample else f.name,pdf_sha256=paper['hash'])
-            if prepared:=st.session_state.get(notes_key+'-prepared'):
-                st.download_button("Download prepared author notes",prepared,f"author-questions-{paper['hash'][:12]}.md",on_click="ignore")
-    for item in result['checked']:
-        c=item['candidate']
-        with st.expander(item['status']+' · '+c['category']):
-            if c.get('matched_claim'):
-                st.caption('Manuscript claim that triggered retrieval')
-                st.write(c['matched_claim'])
-                if c.get('matched_claim_page'):
-                    st.caption(f"Manuscript page {c['matched_claim_page']}")
-            if c.get('family'):st.caption('Historical critique family · '+c['family'])
-            if 'prior_total' in c:
-                st.caption(f"Retrieval score {c['score']:.3f} · trigger similarity {c['similarity']:.3f} · historical severity {c['severity']}/3")
-                if c['prior_total']:
-                    cohort=' / '.join(x for x in (c['matched_claim_type'],c['matched_paper_type']) if x)
-                    if 'prior_reviews' in c:
-                        st.caption(f"{c['prior_reviews']} of {c['prior_total']} distinct labeled reviews in the {cohort} cohort raised this family of concerns.")
-                    else:
-                        st.caption(f"{c['prior_issues']} of {c['prior_total']} labeled issues in the {cohort} cohort belonged to this family.")
-            if c.get('family_assignment'):
-                st.caption(f"Critique family · {c['family']} ({c['family_assignment']})")
-            if c.get('family_fit_reason'):st.caption('Family assignment audit · '+c['family_fit_reason'])
-            if c.get('target_question'):st.markdown('**Question for this manuscript** · '+c['target_question'])
-            if c.get('transfer_question'):st.caption('Historical question · '+c['transfer_question'])
-            st.caption('Historical reviewer comment')
-            st.write(c['critique_text'])
-            if c.get('review_id') and st.toggle("Read the surrounding review text",key="review-field-"+paper['hash']+c['id']):
-                section=historical_review_section(c['paper_id'],c['review_id'],c['critique_text'])
-                if section:
-                    st.caption(section[0])
-                    st.text(section[1])
-                else:
-                    st.caption("The archived field could not be located. Open the historical review below.")
-            if item.get('reason'):st.caption(item['reason'])
-            if check:=item.get('comparison_check'):
-                st.caption(check['status'])
-                for work in check['works']:
-                    rec=work['record']
-                    st.link_button(rec['title']+' · '+rec['published'],rec['url'])
-            current_column,history_column=st.columns(2)
-            with current_column:
-                st.markdown("**Current manuscript**")
-                for ev in item['evidence']:show_evidence(content,ev)
-                if not item['evidence']:
-                    if c.get('matched_claim') and c.get('matched_claim_page'):
-                        if st.toggle("Show the claim in this draft",key="current-"+paper['hash']+c['id']):
-                            show_evidence(content,dict(page=c['matched_claim_page'],quote=c['matched_claim'],reason="Claim that triggered retrieval"))
-                    st.caption("No manuscript passage was accepted as evidence for a criticism.")
-            with history_column:
-                st.markdown("**Historical manuscript**")
-                st.link_button(f"Historical review · {c['year']} · manuscript p. {c['trigger_page']}",c['source'])
-                st.write(c['trigger_text'])
-                pdf_info=c.get('pdf_info') or {}
-                historical_pdf=DATA/pdf_info['file'] if pdf_info.get('file') else DATA/f"iclr{c['year']}"/(c['paper_id']+'.pdf')
-                if pdf_info.get('version'):st.caption(pdf_info['version'])
-                if historical_pdf.is_file() and st.toggle("Show historical manuscript page",key="historical-"+paper['hash']+c['id']):
-                    st.image(highlight(historical_pdf.read_bytes(),c['trigger_page'],c['trigger_text']),width=600)
-    outcome=result['historical_outcome']
-    if outcome and outcome['papers']:
-        st.caption(f"Historical acceptance in matched labeled papers: {outcome['accepted']}/{outcome['papers']}. Descriptive, uncalibrated.")
-        if 'matched_papers' in outcome:
-            excluded=outcome['matched_papers']-outcome['papers']
-            st.caption(f"{excluded} matched manuscripts lacked a recorded main-track acceptance or rejection and were excluded from the denominator.")
-    elif outcome is not None:
-        if outcome.get('matched_papers',0):
-            st.caption(f"Historical acceptance unavailable. None of the {outcome['matched_papers']} matching manuscripts had a recorded main-track acceptance or rejection.")
-        elif any(item['status']=='valid' for item in result['checked']):
-            st.caption("Historical acceptance unavailable. No usable acceptance or rejection was available for the matched concerns.")
-        else:
-            st.caption("Historical acceptance unavailable. The verifier found no supported concern to use for matching historical papers.")
-    with st.expander("Tool calls and prior publications"):st.json(result['tools']);st.json(result['sources'])
-    if sample and st.toggle("Reveal actual reviews and decision",key="truth-"+key):
-        import duckdb,re
-        with duckdb.connect() as db:
-            record=db.execute("select decision,reviews from read_parquet(?) where paper_id=? and year='2025'",[str(DATA/'raw/reviews.parquet'),sample['id']]).fetchone()
-        st.subheader("Published review outcome")
-        st.write(record[0] if record else sample['decision'])
-        comparison=DATA/'metrics/scale-version-evidence.json'
-        if comparison.exists():
-            scale=json.loads(comparison.read_bytes())
-            if sample['id']==scale['paper'] and paper['hash']==scale['later']['sha256']:
-                with st.expander("Did the model-scale evidence change after review?"):
-                    st.caption(f"Public preprint posted {scale['posted'][:10]} · reviewer comment {scale['reviewed'][:10]}")
-                    st.write(scale['reviewer_quote'])
-                    st.link_button('Read this reviewer’s original comment',scale['review_url'])
-                    choice=st.radio('Manuscript evidence',['Pre-review preprint','Later public manuscript','Later results table'],
-                                    horizontal=True,key=key+'-scale-version')
-                    part={'Pre-review preprint':'before','Later public manuscript':'later','Later results table':'table'}[choice]
-                    ev=scale[part]
-                    raw=(DATA/ev['file']).read_bytes()
-                    if hashlib.sha256(raw).hexdigest()==ev['sha256']:
-                        show_evidence(raw,dict(ev,reason=choice))
-                    else:
-                        st.error('The source PDF has changed since the comparison was verified.')
-                    st.caption("The preprint describes experiments on GPT-2 Small. The later manuscript also reports one Gemma 2 2B layer. The added run extends the tested range. Generalization to larger backbone models remains open.")
-                    if results:=scale.get('trigger_retrieval'):
-                        stated=lambda item: 'matched' if item['found'] else 'did not match'
-                        st.caption(f"In the frozen experiment, trigger retrieval {stated(results['earlier'])} this published concern on the early preprint and {stated(results['later'])} it on the later manuscript. This is one version pair.")
-        if record:
-            def numeric_score(value):
-                match=re.match(r"^\s*(\d+(?:\.\d+)?)",str(value))
-                return float(match.group(1)) if match else None
-            labels=["Simulated mean","Published mean"] if venue=="ICLR" else ["NeurIPS simulated mean","ICLR published mean"]
-            for column,label,values in zip(st.columns(2),labels,
-                                           [[r['report'].get('score') for r in result['reviews']],
-                                            [r.get('rating') for r in record[1]]]):
-                scores=[n for value in values if (n:=numeric_score(value)) is not None]
-                column.metric(label,f"{sum(scores)/len(scores):.2f}" if scores else "Abstained")
-                column.caption(f"{len(scores)} scored reviews")
-            st.json(record[1],expanded=False)
-        archive=DATA/'iclr2025/chair_decisions.parquet'
-        if archive.exists():
+    verified=[item for item in result['checked'] if item['status'] in ('valid','partially addressed','addressed') and item.get('evidence')]
+    if verified:
+        with st.expander("Evidence for questions checked against this manuscript",icon=":material/find_in_page:"):
+            states={'valid':('Confirmed concern','red'), 'partially addressed':('Partially answered','orange'), 'addressed':('Answered in the manuscript','green')}
+            for item in verified:
+                candidate=item['candidate']
+                label,color=states[item['status']]
+                st.badge(label,color=color)
+                st.write(candidate.get('target_question') or candidate['category'])
+                for passage in item['evidence']:show_evidence(content,passage)
+                for work in (item.get('comparison_check') or {}).get('works',[]):
+                    if work.get('record'):
+                        record=work['record']
+                        st.link_button(record['title']+' · '+record['published'],record['url'])
+    if scope is None:render_scope(content,result)
+    if result['checked'] and demo_trace.checkbox("Show historical retrieval details",key="trace-"+key,
+        help="Inspect all retrieved candidates, including historical criticisms excluded from this manuscript."):
+        with demo_trace:
+            for item in result['checked']:
+                c=item['candidate']
+                with st.expander(item['status']+' · '+c['category']):
+                    if c.get('matched_claim'):
+                        st.caption('Manuscript claim that triggered retrieval')
+                        st.write(c['matched_claim'])
+                        if c.get('matched_claim_page'):
+                            st.caption(f"Manuscript page {c['matched_claim_page']}")
+                    if c.get('family'):st.caption('Historical critique family · '+c['family'])
+                    if 'prior_total' in c:
+                        st.caption(f"Retrieval score {c['score']:.3f} · trigger similarity {c['similarity']:.3f} · historical severity {c['severity']}/3")
+                        if c['prior_total']:
+                            cohort=' / '.join(x for x in (c['matched_claim_type'],c['matched_paper_type']) if x)
+                            if 'prior_reviews' in c:
+                                st.caption(f"{c['prior_reviews']} of {c['prior_total']} distinct labeled reviews in the {cohort} cohort raised this family of concerns.")
+                            else:
+                                st.caption(f"{c['prior_issues']} of {c['prior_total']} labeled issues in the {cohort} cohort belonged to this family.")
+                    if c.get('family_assignment'):
+                        st.caption(f"Critique family · {c['family']} ({c['family_assignment']})")
+                    if c.get('family_fit_reason'):st.caption('Family assignment audit · '+c['family_fit_reason'])
+                    if c.get('target_question'):st.markdown('**Question for this manuscript** · '+c['target_question'])
+                    if c.get('transfer_question'):st.caption('Historical question · '+c['transfer_question'])
+                    st.caption('Historical reviewer comment')
+                    st.write(c['critique_text'])
+                    if c.get('review_id') and st.toggle("Read the surrounding review text",key="review-field-"+paper['hash']+c['id']):
+                        section=historical_review_section(c['paper_id'],c['review_id'],c['critique_text'])
+                        if section:
+                            st.caption(section[0])
+                            st.text(section[1])
+                        else:
+                            st.caption("The archived field could not be located. Open the historical review below.")
+                    if item.get('reason'):st.caption(item['reason'])
+                    if check:=item.get('comparison_check'):
+                        st.caption(check['status'])
+                        for work in check['works']:
+                            rec=work['record']
+                            st.link_button(rec['title']+' · '+rec['published'],rec['url'])
+                    current_column,history_column=st.columns(2)
+                    with current_column:
+                        st.markdown("**Current manuscript**")
+                        for ev in item['evidence']:show_evidence(content,ev)
+                        if not item['evidence']:
+                            if c.get('matched_claim') and c.get('matched_claim_page'):
+                                if st.toggle("Show the claim in this draft",key="current-"+paper['hash']+c['id']):
+                                    show_evidence(content,dict(page=c['matched_claim_page'],quote=c['matched_claim'],reason="Claim that triggered retrieval"))
+                            st.caption("No manuscript passage was accepted as evidence for a criticism.")
+                    with history_column:
+                        st.markdown("**Historical manuscript**")
+                        st.link_button(f"Historical review · {c['year']} · manuscript p. {c['trigger_page']}",c['source'])
+                        st.write(c['trigger_text'])
+                        pdf_info=c.get('pdf_info') or {}
+                        historical_pdf=DATA/pdf_info['file'] if pdf_info.get('file') else DATA/f"iclr{c['year']}"/(c['paper_id']+'.pdf')
+                        if pdf_info.get('version'):st.caption(pdf_info['version'])
+                        if historical_pdf.is_file() and st.toggle("Show historical manuscript page",key="historical-"+paper['hash']+c['id']):
+                            st.image(highlight(historical_pdf.read_bytes(),c['trigger_page'],c['trigger_text']),width=600)
+    with demo_trace:
+        outcome=result['historical_outcome']
+        if outcome and outcome['papers']:
+            st.caption(f"Historical acceptance in matched labeled papers: {outcome['accepted']}/{outcome['papers']}. Descriptive, uncalibrated.")
+            if 'matched_papers' in outcome:
+                excluded=outcome['matched_papers']-outcome['papers']
+                st.caption(f"{excluded} matched manuscripts lacked a recorded main-track acceptance or rejection and were excluded from the denominator.")
+        elif outcome is not None:
+            if outcome.get('matched_papers',0):
+                st.caption(f"Historical acceptance unavailable. None of the {outcome['matched_papers']} matching manuscripts had a recorded main-track acceptance or rejection.")
+            elif any(item['status']=='valid' for item in result['checked']):
+                st.caption("Historical acceptance unavailable. No usable acceptance or rejection was available for the matched concerns.")
+            else:
+                st.caption("Historical acceptance unavailable. The verifier found no supported concern to use for matching historical papers.")
+        with st.expander("Tool calls and prior publications"):st.json(result['tools']);st.json(result['sources'])
+        if sample and st.toggle("Reveal actual reviews and decision",key="truth-"+key):
+            import duckdb,re
             with duckdb.connect() as db:
-                chair=db.execute('select note_id,writer,content from read_parquet(?) where paper_id=? order by time desc',[str(archive),sample['id']]).fetchall()
-            if chair:
-                with st.expander("Published chair decision and rationale"):
-                    for note,writer,raw in chair:
-                        st.link_button(writer.replace('_',' '),f"https://openreview.net/forum?id={sample['id']}&noteId={note}")
-                        for field,value in json.loads(raw).items():
-                            if field.casefold() in ('title','decision'):continue
-                            st.markdown('**'+field+'**')
-                            render_text(value)
+                record=db.execute("select decision,reviews from read_parquet(?) where paper_id=? and year='2025'",[str(DATA/'raw/reviews.parquet'),sample['id']]).fetchone()
+            st.subheader("Published review outcome")
+            st.write(record[0] if record else sample['decision'])
+            comparison=DATA/'metrics/scale-version-evidence.json'
+            if comparison.exists():
+                scale=json.loads(comparison.read_bytes())
+                if sample['id']==scale['paper'] and paper['hash']==scale['later']['sha256']:
+                    with st.expander("Did the model-scale evidence change after review?"):
+                        st.caption(f"Public preprint posted {scale['posted'][:10]} · reviewer comment {scale['reviewed'][:10]}")
+                        st.write(scale['reviewer_quote'])
+                        st.link_button('Read this reviewer’s original comment',scale['review_url'])
+                        choice=st.radio('Manuscript evidence',['Pre-review preprint','Later public manuscript','Later results table'],
+                                        horizontal=True,key=key+'-scale-version')
+                        part={'Pre-review preprint':'before','Later public manuscript':'later','Later results table':'table'}[choice]
+                        ev=scale[part]
+                        raw=(DATA/ev['file']).read_bytes()
+                        if hashlib.sha256(raw).hexdigest()==ev['sha256']:
+                            show_evidence(raw,dict(ev,reason=choice))
+                        else:
+                            st.error('The source PDF has changed since the comparison was verified.')
+                        st.caption("The preprint describes experiments on GPT-2 Small. The later manuscript also reports one Gemma 2 2B layer. The added run extends the tested range. Generalization to larger backbone models remains open.")
+                        if results:=scale.get('trigger_retrieval'):
+                            stated=lambda item: 'matched' if item['found'] else 'did not match'
+                            st.caption(f"In the frozen experiment, trigger retrieval {stated(results['earlier'])} this published concern on the early preprint and {stated(results['later'])} it on the later manuscript. This is one version pair.")
+            if record:
+                def numeric_score(value):
+                    match=re.match(r"^\s*(\d+(?:\.\d+)?)",str(value))
+                    return float(match.group(1)) if match else None
+                labels=["Simulated mean","Published mean"] if venue=="ICLR" else ["NeurIPS simulated mean","ICLR published mean"]
+                for column,label,values in zip(st.columns(2),labels,
+                                               [[r['report'].get('score') for r in result['reviews']],
+                                                [r.get('rating') for r in record[1]]]):
+                    scores=[n for value in values if (n:=numeric_score(value)) is not None]
+                    column.metric(label,f"{sum(scores)/len(scores):.2f}" if scores else "Abstained")
+                    column.caption(f"{len(scores)} scored reviews")
+                st.json(record[1],expanded=False)
+            archive=DATA/'iclr2025/chair_decisions.parquet'
+            if archive.exists():
+                with duckdb.connect() as db:
+                    chair=db.execute('select note_id,writer,content from read_parquet(?) where paper_id=? order by time desc',[str(archive),sample['id']]).fetchall()
+                if chair:
+                    with st.expander("Published chair decision and rationale"):
+                        for note,writer,raw in chair:
+                            st.link_button(writer.replace('_',' '),f"https://openreview.net/forum?id={sample['id']}&noteId={note}")
+                            for field,value in json.loads(raw).items():
+                                if field.casefold() in ('title','decision'):continue
+                                st.markdown('**'+field+'**')
+                                render_text(value)
+
+if scope is not None:
+    if st.session_state.get(scope_key+"-demo"):st.caption("Demo · saved manuscript reading")
+    render_scope(content,scope)
+if paper.get('sections'):
+    with st.expander("Manuscript sections"):
+        st.dataframe([{'Section':s['heading'],'First page':s['start_page'],'Last page':s['end_page']} for s in paper['sections']],hide_index=True)

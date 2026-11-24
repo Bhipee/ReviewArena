@@ -70,7 +70,7 @@ def render_examples(loaded, key):
     return examples
 
 
-def render_summary(files, selected, model_label):
+def render_summary(files, selected, model_label, demo_inputs, demo_actions):
     choices = {
         f"{name} [{digest[:8]}]": (name, digest, None) for name, digest in selected
     }
@@ -79,7 +79,7 @@ def render_summary(files, selected, model_label):
         digest = hashlib.sha256(content).hexdigest()
         choices[f"{upload.name} [{digest[:8]}]"] = (upload.name, digest, content)
     public_pdf = DATA / "iclr2023/5NTt8GFjUHkr.pdf"
-    if public_pdf.is_file() and st.checkbox("Use the public Auto-CoT paper"):
+    if public_pdf.is_file() and demo_inputs.checkbox("Use the public Auto-CoT paper"):
         raw = public_pdf.read_bytes()
         choices = {
             "Auto-CoT · public example": (
@@ -102,57 +102,58 @@ def render_summary(files, selected, model_label):
         st.warning(
             "These older references need to be reattached: " + ", ".join(missing)
         )
-    if templates:
-        if pick := st.session_state.pop("lab-summary-select-template", None):
-            st.session_state["lab-summary-picker"] = pick
-        selected_template = st.selectbox(
-            "Saved templates",
-            list(templates),
-            format_func=lambda i: f"{templates[i]} · #{i}",
-            key="lab-summary-picker",
-        )
-        if st.button("Load template"):
-            open_template(selected_template)
-
-    loaded = st.session_state.get("lab-summary-editor", {})
-    key = f"lab-summary-edit-{st.session_state.get('lab-summary-editor-version', 0)}-"
-    if loaded:
-        st.caption(f"Editing template #{loaded['id']} · {loaded['name']}")
-    prompt = st.text_area(
-        "Summary instructions",
-        value=loaded.get("prompt", DEFAULT_PROMPT),
-        height=100,
-        key=key + "prompt",
-    )
-    examples = render_examples(loaded.get("examples", []), key)
-    valid = bool(prompt.strip()) and all(e["summary"].strip() for e in examples)
-
-    name = st.text_input(
-        "Template name", value=loaded.get("name", ""), key=key + "name"
-    )
-    save_copy = st.button(
-        "Save as new template", disabled=not valid or not name.strip()
-    )
-    update = loaded and st.button(
-        "Update loaded template", disabled=not valid or not name.strip()
-    )
-    if save_copy or update:
-        try:
-            saved_id = save_template(
-                name,
-                prompt,
-                examples,
-                template_id=loaded["id"] if update else None,
-                revision=loaded["revision"] if update else None,
+    with st.expander("Summary instructions, examples and saved templates"):
+        if templates:
+            if pick := st.session_state.pop("lab-summary-select-template", None):
+                st.session_state["lab-summary-picker"] = pick
+            selected_template = st.selectbox(
+                "Saved templates",
+                list(templates),
+                format_func=lambda i: f"{templates[i]} · #{i}",
+                key="lab-summary-picker",
             )
-            open_template(saved_id)
-            st.session_state["lab-summary-select-template"] = saved_id
-            st.session_state[
-                "lab-summary-template-notice"
-            ] = f"Template saved · {name.strip()}"
-            st.rerun()
-        except (ValueError, OSError, sqlite3.Error) as exc:
-            st.error(str(exc))
+            if st.button("Load template"):
+                open_template(selected_template)
+
+        loaded = st.session_state.get("lab-summary-editor", {})
+        key = f"lab-summary-edit-{st.session_state.get('lab-summary-editor-version', 0)}-"
+        if loaded:
+            st.caption(f"Editing template #{loaded['id']} · {loaded['name']}")
+        prompt = st.text_area(
+            "Summary instructions",
+            value=loaded.get("prompt", DEFAULT_PROMPT),
+            height=100,
+            key=key + "prompt",
+        )
+        examples = render_examples(loaded.get("examples", []), key)
+        valid = bool(prompt.strip()) and all(e["summary"].strip() for e in examples)
+
+        name = st.text_input(
+            "Template name", value=loaded.get("name", ""), key=key + "name"
+        )
+        save_copy = st.button(
+            "Save as new template", disabled=not valid or not name.strip()
+        )
+        update = loaded and st.button(
+            "Update loaded template", disabled=not valid or not name.strip()
+        )
+        if save_copy or update:
+            try:
+                saved_id = save_template(
+                    name,
+                    prompt,
+                    examples,
+                    template_id=loaded["id"] if update else None,
+                    revision=loaded["revision"] if update else None,
+                )
+                open_template(saved_id)
+                st.session_state["lab-summary-select-template"] = saved_id
+                st.session_state[
+                    "lab-summary-template-notice"
+                ] = f"Template saved · {name.strip()}"
+                st.rerun()
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                st.error(str(exc))
 
     missing_reference = any(
         e.get("name") and e.get("content") is None for e in examples
@@ -164,6 +165,7 @@ def render_summary(files, selected, model_label):
     run, demo = action_buttons(
         "Generate and save summary",
         "paper-summary",
+        demo_panel=demo_actions, demo_label="Load saved paper summary", primary=True,
         available=archived is not None or has_local,
         disabled=not target or not valid or missing_reference,
     )

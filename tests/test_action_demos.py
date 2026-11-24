@@ -86,3 +86,29 @@ class ActionDemoTests(TestCase):
         )
         with self.assertRaises(ValueError):
             read_review_demo(path, "pdf", "ICLR", "2024-10-02")
+
+
+class ActionPlacementTests(TestCase):
+    def test_live_and_saved_controls_use_separate_regions_and_events(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_string("""
+import streamlit as st
+from reviewarena.demo_ui import action_buttons
+
+inputs = st.container()
+available = inputs.checkbox("Saved result available", value=True)
+panel = st.expander("ForDemo", expanded=False)
+live, saved = action_buttons("Run review", "review", demo_panel=panel,
+    demo_label="Load saved review", available=available, live_panel=inputs)
+if live or saved:
+    st.write("loaded from disk" if saved else "live action")
+""").run()
+        self.assertFalse(app.exception)
+        self.assertEqual([b.label for b in app.expander[0].button], ["Load saved review"])
+        self.assertFalse(app.expander[0].proto.expanded)
+        self.assertEqual(app.button(key="live-review").click().run().markdown[-1].value, "live action")
+        self.assertEqual(app.button(key="demo-review").click().run().markdown[-1].value, "loaded from disk")
+        app.checkbox[0].uncheck().run()
+        self.assertTrue(app.button(key="demo-review").disabled)
+        self.assertFalse(app.button(key="live-review").disabled)

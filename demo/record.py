@@ -3,6 +3,7 @@ from pathlib import Path
 import os,subprocess,tempfile,sys
 import imageio_ffmpeg
 from playwright.sync_api import sync_playwright
+from browser_controls import set_demo_panel, select_example
 
 ROOT=Path(__file__).resolve().parent
 TITLE="Efficient Dictionary Learning with Switch Sparse Autoencoders"
@@ -18,10 +19,9 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as client:
     page.goto(os.environ.get("REVIEWARENA_DEMO_URL","http://127.0.0.1:8516"))
     sidebar=page.locator('[data-testid="stSidebar"]')
     sidebar.get_by_text("Manuscript review",exact=True).click()
-    sidebar.get_by_role("combobox",name="Manuscript",exact=True).click()
-    page.get_by_role("option",name=TITLE,exact=True).click()
-    page.get_by_role("heading",name=TITLE,exact=True).wait_for()
+    select_example(page,TITLE)
     page.locator(".st-key-demo-manuscript-reading button").click()
+    set_demo_panel(page,False)
     page.get_by_text("Claims as stated in the manuscript",exact=True).click()
     page.locator("details[open] img").first.scroll_into_view_if_needed()
     hold(5)
@@ -30,14 +30,17 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as client:
     page.locator("details[open] img").first.scroll_into_view_if_needed()
     hold(5)
     page.get_by_text("Limitations already stated by the authors",exact=True).click()
+    set_demo_panel(page)
     page.locator(".st-key-demo-manuscript-review button").click()
+    set_demo_panel(page,False)
     page.get_by_text("Area chair recommendation",exact=True).wait_for()
     page.get_by_text("Experiments and evaluation",exact=True).first.scroll_into_view_if_needed()
     hold(4)
     questions=page.get_by_text("Open questions for the authors (",exact=False).first
     if questions.count():
         questions.click()
-        page.get_by_role('button',name='Compare question wording with historical reviews').click()
+        set_demo_panel(page).get_by_role('button',name='Compare question wording with historical reviews').click()
+        set_demo_panel(page,False)
         find=page.get_by_role('button',name='Find figures and tables for these questions')
         if find.count():find.click()
         page.get_by_role('textbox',name='Evidence or revision decision').first.fill(
@@ -51,6 +54,7 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as client:
         questions.click()
     page.get_by_text("Area chair recommendation",exact=True).scroll_into_view_if_needed()
     hold(6)
+    set_demo_panel(page)
     page.get_by_text("Reveal actual reviews and decision",exact=True).click()
     change=page.get_by_text('Did the model-scale evidence change after review?',exact=True)
     change.click()
@@ -61,18 +65,20 @@ with tempfile.TemporaryDirectory() as tmp,sync_playwright() as client:
     page.get_by_text("Published mean",exact=True).scroll_into_view_if_needed()
     hold(5)
     sidebar.get_by_text("Rebuttal",exact=True).click()
-    page.get_by_role("heading",name="Rebuttal workbench").wait_for()
+    page.get_by_role("heading",name="Rebuttal",exact=True).wait_for()
+    set_demo_panel(page)
     page.get_by_text("Use an actual reviewer comment",exact=True).click()
     page.locator(".st-key-demo-rebuttal-reply button").wait_for()
     hold(4)
     page.locator(".st-key-demo-rebuttal-reply button").click()
+    set_demo_panel(page,False)
     page.get_by_text("Experiment checklist",exact=True).wait_for()
     page.get_by_text("Experiment checklist",exact=True).scroll_into_view_if_needed()
     hold(5)
     with page.expect_download() as downloading:
         page.get_by_text("Download Markdown",exact=True).click()
     exported=Path(downloading.value.path()).read_text()
-    if '**Response (experiment)**' not in exported:raise RuntimeError("Exported rebuttal did not contain the experimental response")
+    if '**Response to reviewer (experiment)**' not in exported:raise RuntimeError("Exported rebuttal did not contain the experimental response")
     if page.locator('[data-testid="stException"]').count():raise RuntimeError("Streamlit exception in recording")
     context.close()
     browser.close()

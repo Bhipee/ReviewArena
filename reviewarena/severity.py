@@ -2,7 +2,7 @@
 import re
 
 from .model import ModelJSONError
-from .reviewer_roles import REVIEWER_ROLES, reviewer_prompt
+from .reviewer_roles import PRESENTATION, REVIEWER_ROLES, reviewer_prompt
 
 
 async def check_rating(report, role, claims, conflicts, pages, score_labels, ask):
@@ -10,8 +10,15 @@ async def check_rating(report, role, claims, conflicts, pages, score_labels, ask
     for finding in conflicts + report.get('weaknesses', []):
         if finding.get('kind') == 'scope_check':
             continue
+        sources = finding.get('evidence', [])
+        if role == PRESENTATION and sources and all(item.get("kind") in (
+            "caption", "printed reference to check", "extracted table label", "visual observation"
+        ) for item in sources):
+            # These sources can justify the presentation assessment. A further automatic
+            # scientific downgrade needs independent evidence about the method or result.
+            continue
         quotes = []
-        for item in finding.get('evidence', []):
+        for item in sources:
             page, quote = item.get('page'), item.get('quote')
             if isinstance(page, int) and 1 <= page <= len(pages) and isinstance(quote,str) and quote.strip():
                 if quote in pages[page-1]:

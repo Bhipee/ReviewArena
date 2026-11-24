@@ -468,6 +468,10 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
             if audit:report['presentation_review']=audit
             if anchor:=primary.get(str(report.pop('lead_evidence_id', ''))):
                 report['focus_evidence']=anchor
+                if role==INNOVATION and not finding:
+                    assessed=anchor.get("comparison") or anchor.get("value")
+                    if assessed:
+                        report["specialist_finding"]=dict(assessment=assessed,source=anchor)
             report['weaknesses']=cited_weaknesses(raw_weaknesses,trace,shared+excerpts)
             await check_rating(report,role,claims,owned_conflicts,pages,SCORE_LABELS[venue],ask)
         else:

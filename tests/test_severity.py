@@ -25,3 +25,13 @@ class SeverityTests(unittest.IsolatedAsyncioTestCase):
         await check_rating(report,'reviewer',[],[finding],quotes,{1:'Strong reject',3:'Reject',6:'Borderline accept'},ask)
         ask.assert_not_awaited()
         self.assertEqual(report['score'],6)
+
+    async def test_caption_quality_alone_cannot_trigger_scientific_score_cap(self):
+        from reviewarena.reviewer_roles import PRESENTATION
+        passage="Figure 1: Context management overview."
+        report=dict(score=8, weaknesses=[dict(issue="Caption lacks context.",
+                      evidence=[dict(page=1,quote=passage,kind="caption")])])
+        ask=AsyncMock()
+        await check_rating(report,PRESENTATION,[],[],[passage],{1:"Strong reject",3:"Reject",8:"Accept"},ask)
+        ask.assert_not_awaited()
+        self.assertEqual(report["score"],8)

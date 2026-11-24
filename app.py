@@ -1126,8 +1126,10 @@ if result:
                 st.write(source['comparison'])
                 if source.get('prior_url'):st.link_button(source['prior_work'],source['prior_url'])
                 else:st.caption(source['prior_work'])
+        elif report.get("focus_evidence"):
+            st.caption("The overall assessment below cites the passage selected by this reviewer.")
         elif report.get("recommendation"):
-            st.caption("The reviewer could not ground a separate specialist finding in a specific passage.")
+            st.caption("A separate specialist finding could not be verified.")
         if audit:=report.get('presentation_review'):
             st.caption(audit['mode'] + (" · p. "+', '.join(map(str,audit['inspected_pages'])) if audit['inspected_pages'] else ''))
             for observation in audit['sources']:

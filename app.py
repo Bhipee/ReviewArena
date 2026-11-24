@@ -18,10 +18,12 @@ from reviewarena.workflow import ask
 from reviewarena.lab import run_lab,meeting_markdown
 from reviewarena.reviewer_ui import WEAKNESS_FIELDS, render_weaknesses, review_items, statement
 from reviewarena.demo_ui import action_buttons,remember_demo,workspace_style
+from reviewarena.rebuttal_ui import (comparison_captions,experiments_by_reviewer_point,render_experiments,
+    render_historical_replies,render_manuscript_evidence,render_mentioned_works,show_evidence)
 from reviewarena.demos import chair_inputs,demo_path,fingerprint,load_demo,public_lab_result,read_review_demo,read_scope_demo,review_demo_path
 from reviewarena.named_demo_ui import demo_library,save_current_demo
 from reviewarena.summary_ui import render_summary,render_saved_summary
-from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes
+from reviewarena.api import rebuttal_markdown,author_questions,author_question_notes
 from reviewarena.library import document,list_documents,read_documents,save_documents,saved_pdf
 
 st.set_page_config(page_title="ReviewArena",layout="wide")
@@ -67,26 +69,6 @@ def call(coro):
 def manifest(year):
     path=DATA/f'iclr{year}/manifest.json'
     return json.loads(path.read_text()) if path.exists() else []
-def show_evidence(content,ev):
-    st.caption(f"Manuscript evidence · p. {ev['page']}")
-    if ev.get("reason"):st.write(ev["reason"])
-    st.write(ev['quote'])
-    st.image(highlight(content,ev['page'],ev['quote']),width=600)
-def render_comparisons(content,reading):
-    st.caption('Prior work published before '+reading['before'])
-    if not reading['works']:st.write('No named work was identified in this reviewer comment.')
-    tables={}
-    for work in reading['works']:
-        st.markdown('**'+work['mention']+'**')
-        record=work['catalog_record']
-        if record:
-            st.link_button(record['title']+' · '+record['published'],record['url'])
-        else:st.caption('Catalog identity unresolved for '+work['query'])
-        for citation in work['bibliography']:st.write(f"Manuscript p. {citation['page']} · {citation['quote']}")
-        for passage in work['comparison_passages']:tables[passage['page'],passage['quote']]=passage
-        if not work['comparison_passages']:st.caption('No matching comparison-table caption located in the extracted PDF text.')
-    for passage in tables.values():show_evidence(content,{**passage,'reason':'Comparison-table caption in this PDF'})
-
 def render_scope(content,result):
     entries=[]
     for number, claim in enumerate(result.get('claims',[]),1):
@@ -255,7 +237,8 @@ if activity=="Corpus":
                 st.write(reading['reviewer_comment'])
                 st.link_button('Original request for comparisons',example['historical_review'])
                 st.caption('The available public PDF includes a comparison. The archived reviewer requested these comparisons. The exact PDF version they reviewed is unknown.')
-                render_comparisons(pdf,reading)
+                render_mentioned_works(reading)
+                for passage in comparison_captions(reading):show_evidence(pdf,passage)
     audit_file=DATA/'metrics/historical-source-audit.json'
     coverage_file=DATA/'metrics/label-coverage.json'
     audit=json.loads(audit_file.read_bytes()) if audit_file.exists() else {}
@@ -805,21 +788,23 @@ if activity=="Rebuttal":
                    before=cutoff.isoformat(),comment=text,reply=result,reading=reading)
               if result or reading else None)
         save_current_demo(save_panel,activity,manuscript_title,view,lambda:{"manuscript":content})
-    steps=experiment_checklist(result['responses']) if result else []
-    if result:
-        names=["Response draft","Evidence and references"]+(["Experiment checklist"] if steps else [])
+    responses=result["responses"] if result else []
+    steps=experiments_by_reviewer_point(responses)
+    if result or reading:
+        names=["Response draft","Manuscript evidence","References"] if result else ["References","Manuscript evidence"]
+        if steps:names.append("Experiment checklist")
         panels=dict(zip(names,st.tabs(names)))
-        draft_panel=panels["Response draft"]
-        sources_panel=panels["Evidence and references"]
-    elif reading:
-        sources_panel=st.container()
-    if reading:
-        with sources_panel:
-            st.subheader("Reference check results")
-            if st.session_state.get('works-demo-'+rkey):st.caption("Demo · saved comparison check")
-            render_comparisons(content,reading)
+        with panels["Manuscript evidence"]:
+            render_manuscript_evidence(content,responses,reading,rkey)
+        with panels["References"]:
+            if reading:
+                if st.session_state.get('works-demo-'+rkey):st.caption("Demo · saved comparison check")
+                render_mentioned_works(reading)
+            if result:
+                render_historical_replies(responses,rkey)
     if result:
         if st.session_state.get('reply-demo-'+rkey):draft_panel.caption('Demo · saved rebuttal draft')
+        draft_panel=panels["Response draft"]
         draft_panel.subheader("Point-by-point response")
         draft_panel.download_button("Download rebuttal draft",rebuttal_markdown(result["responses"]),"rebuttal.md")
         for number,item in enumerate(result['responses'],1):
@@ -843,31 +828,9 @@ if activity=="Rebuttal":
                         linked=[h for h in item['history'] if h.get('reply_strategy')==name]
                         replies=len({h['reply_id'] for h in linked if h.get('reply_id')})
                         st.caption(f"{name.capitalize()} · Distinct replies: {replies} · Linked concerns: {len(linked)} · Concerns with a documented outcome: {counts['known_outcomes']} · Recorded as resolved: {counts['resolved']}")
-            with sources_panel.container(border=True):
-                st.markdown(f"**Reviewer point {number}**")
-                st.write(item['critique'])
-                if not item['evidence'] and not item['history']:st.caption("No linked evidence or historical reply.")
-                for ev in item['evidence']:show_evidence(content,ev)
-                for h in item['history']:
-                    st.markdown(h['title'])
-                    st.link_button('Historical reviewer comment',h['source'])
-                    if h.get('reply_id') and h.get('paper_id'):
-                        st.link_button('Historical author reply',f"https://openreview.net/forum?id={h['paper_id']}&noteId={h['reply_id']}")
-                    try:reply=json.loads(h['reply'])
-                    except (TypeError,ValueError):reply=h['reply']
-                    if isinstance(reply,dict):reply=reply.get('Comment') or reply.get('Response') or reply
-                    st.write(reply)
-                    if h.get('reply_strategy_quote'):
-                        st.caption("Author wording for the response strategy")
-                        st.write(h['reply_strategy_quote'])
-                    if h.get('resolution_quote') and type(h.get('resolved')) is bool:
-                        state='resolved' if h['resolved'] else 'unresolved'
-                        st.caption(f"Reviewer wording for the recorded outcome · {state}")
-                        st.write(h['resolution_quote'])
-        if steps:panels["Experiment checklist"].subheader("Experiment checklist")
-        for a in steps:
-            action=f"Priority {a.get('priority','unassigned')} · effort {a.get('effort','to estimate')} · {a['experiment']}"
-            panels["Experiment checklist"].write(action)
+        if steps:
+            with panels["Experiment checklist"]:
+                render_experiments(steps,rkey)
 
     st.stop()
 if active_demo:

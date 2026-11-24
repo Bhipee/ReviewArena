@@ -122,6 +122,8 @@ Pass PDF bytes or a local file path to `reviewarena.api.retrieve_candidates`, `v
 
 ### ForDemo
 
+To keep a presentation example, open **ForDemo** after a result appears, enter an optional **Demo name**, and choose **Save current for demo**. Later, open the same workspace, pick the entry under **Saved demos**, and choose **Load saved demo**. Playback opens the saved results and evidence without uploading the inputs again or calling the model. **Exit saved demo** returns to the workspace. Each save creates a separate entry in `data/private/named-demos.sqlite3` on the computer running ReviewArena.
+
 In **Reviewer reports**, select a reviewer to read their weaknesses and cited passages. The **Show raw reviewer weaknesses** switch inside **ForDemo** displays the original fields for comparison.
 
 The main workspace runs the configured model. Open the collapsed **ForDemo** panel to select public examples and load saved outputs for the current inputs. In Manuscript review, historical retrieval details and the published decision are also available there. Running a main action successfully prepares a demo for those inputs. For paper summaries this includes the instructions and any example summaries and reference papers. A disabled replay button means no saved result is available for those inputs.

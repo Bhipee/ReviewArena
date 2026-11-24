@@ -19,7 +19,8 @@ from reviewarena.lab import run_lab,meeting_markdown
 from reviewarena.reviewer_ui import WEAKNESS_FIELDS, render_weaknesses, review_items, statement
 from reviewarena.demo_ui import action_buttons,remember_demo,workspace_style
 from reviewarena.demos import chair_inputs,demo_path,fingerprint,load_demo,public_lab_result,read_review_demo,read_scope_demo,review_demo_path
-from reviewarena.summary_ui import render_summary
+from reviewarena.named_demo_ui import demo_library,save_current_demo
+from reviewarena.summary_ui import render_summary,render_saved_summary
 from reviewarena.api import experiment_checklist,rebuttal_markdown,author_questions,author_question_notes
 from reviewarena.library import document,list_documents,read_documents,save_documents,saved_pdf
 
@@ -38,7 +39,10 @@ st.write(purpose[activity])
 inputs_panel=st.container(key="workspace-inputs")
 with st.container(key="demo-panel"):
     demo_panel=st.expander(":material/science: ForDemo",expanded=False)
-demo_panel.caption("Choose a public example, load saved results or inspect diagnostic records. Loading a saved result does not call the model.")
+demo_panel.caption("Save this result for a presentation, open a saved demo or explore a public example. Playback runs without a model call.")
+active_demo=demo_library(demo_panel.container(),activity)
+saved_view=active_demo["view"] if active_demo else None
+save_panel=demo_panel.container()
 demo_inputs=demo_panel.container()
 demo_actions=demo_panel.container()
 demo_trace=demo_panel.container()
@@ -533,84 +537,106 @@ if activity=="Corpus":
                     st.caption("Each count is a distinct published concern for one manuscript and method. Each pair uses two different PDFs, the same review protocol and the same published reviewer concerns.")
     st.stop()
 if activity=="Lab meeting":
-    inputs_panel.subheader("Meeting materials")
-    files=inputs_panel.file_uploader("Group papers and meeting notes",type=['pdf','txt','md'],accept_multiple_files=True)
-    if files and inputs_panel.button("Save uploads to local lab library"):
-        try:
-            save_documents([(f.name,f.getvalue()) for f in files])
-            st.success("Saved to this computer’s lab library.")
-        except Exception as exc:st.error(str(exc))
-    if saved_name:=st.session_state.pop("new-meeting-record",None):
-        st.success(f"Decision saved. Select {saved_name} for the next brief.")
-    library=list_documents()
-    selected=inputs_panel.multiselect("Saved lab documents",library,format_func=lambda item:f"{item[0]} · {item[1][:8]}") if library else []
     task_names={'question':'Q&A','related-work-gap':'Related work','reviewer-2':'Reviewer #2','weekly-brief':'Weekly brief','summary':'Paper summary'}
-    inputs_panel.subheader("Meeting task")
-    mode=inputs_panel.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
-    if mode=='summary':
-        render_summary(files,selected,model_label,demo_inputs,demo_actions)
-        st.stop()
-    use_demo=demo_inputs.checkbox("Use the public research-group example",key="lab-public-example")
-    public_path=DATA/'lab-replays'/(mode+'.json')
-    public=json.loads(public_path.read_bytes()) if use_demo and public_path.is_file() else None
-    q=inputs_panel.text_area("Question or meeting topic",value=public['question'] if public else "",
-                   key=f"lab-topic-{mode}-{use_demo}")
-    sources={f"{name} [{digest[:8]}]":digest for name,digest in selected}
-    for upload in files:
-        digest=hashlib.sha256(upload.getvalue()).hexdigest()
-        sources[f"{upload.name} [{digest[:8]}]"]=digest
-    demo_ids=[]
-    demo_note=DATA/'lab-pilot/group-evaluation-note.md'
-    if use_demo:
-        demo_ids=([Path(name).stem for name in public['documents']] if public else
-                  sorted({r['paper_id'] for r in json.loads((DATA.parent/'eval/lab_qa.json').read_text())}))
-        for i in demo_ids:
-            name=i+'.pdf'
-            sources[name]=hashlib.sha256((DATA/'iclr2023'/name).read_bytes()).hexdigest()
-        if mode=='weekly-brief':
-            notes=public.get('meeting_records',{}) if public else {}
-            if notes:demo_note=DATA/next(iter(notes.values()))['path']
-            if demo_note.is_file():sources[demo_note.name]=hashlib.sha256(demo_note.read_bytes()).hexdigest()
-    names=list(sources)
-    manuscript=inputs_panel.selectbox("Draft to check for related work",names) if mode=='related-work-gap' and names else None
-    meeting_records=[]
-    if mode=='weekly-brief' and names:
-        meeting_records=inputs_panel.multiselect("Meeting records documenting group work",names,
-            default=[n for n in names if n.rsplit(' [',1)[0].lower().endswith(('.md','.txt'))],
-            help="Select the records for a group progress meeting. Leave this empty for a literature discussion.")
-    lab_inputs=[mode,q,sources,manuscript,sorted(meeting_records)]
-    labkey="lab-"+fingerprint(lab_inputs)
-    public_result=public_lab_result(public,lab_inputs) if public else None
-    has_local=demo_path('lab',lab_inputs).is_file()
-    actions={'question':'Answer question','related-work-gap':'Find related work','reviewer-2':'Review selected papers','weekly-brief':'Prepare weekly brief'}
-    live,demo=action_buttons(actions[mode],"lab-"+mode,demo_panel=demo_actions,demo_label="Load saved "+task_names[mode],live_panel=inputs_panel,primary=True,available=has_local or public_result is not None,
-                             disabled=not names or not q.strip())
-    if demo:
-        st.session_state[labkey]=load_demo('lab',lab_inputs) if has_local else public_result
-        st.session_state[labkey+'-demo']=True
-    if live:
-        docs=read_documents(selected)
-        try:
-            for f in files:
-                content=f.getvalue()
-                docs[f"{f.name} [{hashlib.sha256(content).hexdigest()[:8]}]"]=document(f.name,content)
-        except Exception as exc:
-            st.error(str(exc));st.stop()
+    if active_demo:
+        mode=saved_view["mode"]
+        if mode=="summary":
+            render_saved_summary(saved_view,active_demo["files"])
+            st.stop()
+        q=saved_view["question"]
+        result=saved_view["result"]
+        labkey=f"named-lab-{active_demo['id']}"
+        inputs_panel.subheader(task_names[mode])
+        inputs_panel.write(q)
+    else:
+        inputs_panel.subheader("Meeting materials")
+        files=inputs_panel.file_uploader("Group papers and meeting notes",type=['pdf','txt','md'],accept_multiple_files=True)
+        if files and inputs_panel.button("Save uploads to local lab library"):
+            try:
+                save_documents([(f.name,f.getvalue()) for f in files])
+                st.success("Saved to this computer’s lab library.")
+            except Exception as exc:st.error(str(exc))
+        if saved_name:=st.session_state.pop("new-meeting-record",None):
+            st.success(f"Decision saved. Select {saved_name} for the next brief.")
+        library=list_documents()
+        selected=inputs_panel.multiselect("Saved lab documents",library,format_func=lambda item:f"{item[0]} · {item[1][:8]}") if library else []
+        inputs_panel.subheader("Meeting task")
+        mode=inputs_panel.radio("Task",list(task_names),format_func=task_names.get,horizontal=True)
+        if mode=='summary':
+            render_summary(files,selected,model_label,demo_inputs,demo_actions,save_panel)
+            st.stop()
+        use_demo=demo_inputs.checkbox("Use the public research-group example",key="lab-public-example")
+        public_path=DATA/'lab-replays'/(mode+'.json')
+        public=json.loads(public_path.read_bytes()) if use_demo and public_path.is_file() else None
+        q=inputs_panel.text_area("Question or meeting topic",value=public['question'] if public else "",
+                       key=f"lab-topic-{mode}-{use_demo}")
+        sources={f"{name} [{digest[:8]}]":digest for name,digest in selected}
+        for upload in files:
+            digest=hashlib.sha256(upload.getvalue()).hexdigest()
+            sources[f"{upload.name} [{digest[:8]}]"]=digest
+        demo_ids=[]
+        demo_note=DATA/'lab-pilot/group-evaluation-note.md'
         if use_demo:
-            docs.update({i+'.pdf':parse_pdf((DATA/'iclr2023'/(i+'.pdf')).read_bytes()) for i in demo_ids})
-        if use_demo and mode=='weekly-brief' and demo_note.is_file():docs[demo_note.name]=document(demo_note.name,demo_note.read_bytes())
-        st.session_state[labkey]=call(run_lab(q,docs,mode,manuscript,meeting_records))
-        st.session_state[labkey+'-demo']=False
-        if st.session_state[labkey]:
-            remember_demo('lab',lab_inputs,st.session_state[labkey])
-            st.rerun()
-    if result:=st.session_state.get(labkey):
+            demo_ids=([Path(name).stem for name in public['documents']] if public else
+                      sorted({r['paper_id'] for r in json.loads((DATA.parent/'eval/lab_qa.json').read_text())}))
+            for i in demo_ids:
+                name=i+'.pdf'
+                sources[name]=hashlib.sha256((DATA/'iclr2023'/name).read_bytes()).hexdigest()
+            if mode=='weekly-brief':
+                notes=public.get('meeting_records',{}) if public else {}
+                if notes:demo_note=DATA/next(iter(notes.values()))['path']
+                if demo_note.is_file():sources[demo_note.name]=hashlib.sha256(demo_note.read_bytes()).hexdigest()
+        names=list(sources)
+        manuscript=inputs_panel.selectbox("Draft to check for related work",names) if mode=='related-work-gap' and names else None
+        meeting_records=[]
+        if mode=='weekly-brief' and names:
+            meeting_records=inputs_panel.multiselect("Meeting records documenting group work",names,
+                default=[n for n in names if n.rsplit(' [',1)[0].lower().endswith(('.md','.txt'))],
+                help="Select the records for a group progress meeting. Leave this empty for a literature discussion.")
+        lab_inputs=[mode,q,sources,manuscript,sorted(meeting_records)]
+        labkey="lab-"+fingerprint(lab_inputs)
+        public_result=public_lab_result(public,lab_inputs) if public else None
+        has_local=demo_path('lab',lab_inputs).is_file()
+        actions={'question':'Answer question','related-work-gap':'Find related work','reviewer-2':'Review selected papers','weekly-brief':'Prepare weekly brief'}
+        live,demo=action_buttons(actions[mode],"lab-"+mode,demo_panel=demo_actions,demo_label="Load saved "+task_names[mode],live_panel=inputs_panel,primary=True,available=has_local or public_result is not None,
+                                 disabled=not names or not q.strip())
+        if demo:
+            st.session_state[labkey]=load_demo('lab',lab_inputs) if has_local else public_result
+            st.session_state[labkey+'-demo']=True
+        if live:
+            docs=read_documents(selected)
+            try:
+                for f in files:
+                    content=f.getvalue()
+                    docs[f"{f.name} [{hashlib.sha256(content).hexdigest()[:8]}]"]=document(f.name,content)
+            except Exception as exc:
+                st.error(str(exc));st.stop()
+            if use_demo:
+                docs.update({i+'.pdf':parse_pdf((DATA/'iclr2023'/(i+'.pdf')).read_bytes()) for i in demo_ids})
+            if use_demo and mode=='weekly-brief' and demo_note.is_file():docs[demo_note.name]=document(demo_note.name,demo_note.read_bytes())
+            st.session_state[labkey]=call(run_lab(q,docs,mode,manuscript,meeting_records))
+            st.session_state[labkey+'-demo']=False
+            if st.session_state[labkey]:
+                remember_demo('lab',lab_inputs,st.session_state[labkey])
+                st.rerun()
+        result=st.session_state.get(labkey)
+    if result:
         if st.session_state.get(labkey+'-demo'):st.caption("Demo · saved lab meeting result")
         answer_tab,sources_tab,notes_tab=st.tabs(["Answer","Sources","Meeting notes"])
         answer_tab.subheader({"question":"Answer and sources","related-work-gap":"Related work to inspect","reviewer-2":"Reviewer feedback","weekly-brief":"Weekly meeting brief"}[mode])
-        uploads={f"{f.name} [{hashlib.sha256(f.getvalue()).hexdigest()[:8]}]":f for f in files if f.name.lower().endswith('.pdf')}
-        stored={f"{n} [{d[:8]}]":d for n,d in selected if n.lower().endswith('.pdf')}
-        demo_files={i+'.pdf' for i in demo_ids}
+        if active_demo:
+            pdf_names=active_demo["files"].keys()
+            source_pdf=active_demo["files"].get
+        else:
+            uploads={f"{f.name} [{hashlib.sha256(f.getvalue()).hexdigest()[:8]}]":f for f in files if f.name.lower().endswith('.pdf')}
+            stored={f"{n} [{d[:8]}]":d for n,d in selected if n.lower().endswith('.pdf')}
+            demo_files={i+'.pdf' for i in demo_ids}
+            pdf_names=uploads.keys() | stored.keys() | demo_files
+
+            def source_pdf(name):
+                if name in uploads:return uploads[name].getvalue()
+                if name in demo_files:return (DATA/'iclr2023'/name).read_bytes()
+                return saved_pdf(stored[name])
         for point_number,p in enumerate(result['points']):
             if heading:=p.get('heading'):
                 answer_tab.markdown("**"+heading+"**")
@@ -626,11 +652,9 @@ if activity=="Lab meeting":
                     st.caption(f"{s['file']} · p. {s['page']}")
                     st.write(s['text'])
                     name=s['file']
-                    if name in uploads or name in stored or name in demo_files:
+                    if name in pdf_names:
                         if st.checkbox("Show original PDF page",key=f"{labkey}-{point_number}-{source_number}-{s['id']}"):
-                            if name in uploads:source=uploads[name].getvalue()
-                            elif name in demo_files:source=(DATA/'iclr2023'/name).read_bytes()
-                            else:source=saved_pdf(stored[name])
+                            source=source_pdf(name)
                             if source:st.image(highlight(source,s['page'],s['text']),width=650)
                             else:st.caption("Save the original PDF again to display the page image for this older library entry.")
         with sources_tab:
@@ -643,110 +667,144 @@ if activity=="Lab meeting":
                 st.caption("No source passages were returned for this answer.")
         result_hash=hashlib.sha256(json.dumps(result,sort_keys=True).encode()).hexdigest()
         decision_key=f'{labkey}-{result_hash}-agreed-decision'
-        agreed=st.session_state.get(decision_key)
+        agreed=saved_view.get("agreed") if active_demo else st.session_state.get(decision_key)
         if agreed:
             notes_tab.subheader("Decision agreed by the group")
             notes_tab.write(agreed)
         st.download_button("Download meeting notes",meeting_markdown(q,result,agreed),"meeting.md",on_click="ignore")
-        with notes_tab:
-            st.subheader("Record a meeting decision")
-            with st.form('meeting-decision-'+decision_key):
-                decision=st.text_area("Decision agreed by the group",placeholder="Which action did you agree to, and who will follow up?")
-                save_decision=st.form_submit_button("Save decision to local library")
-            if save_decision:
-                if decision.strip():
-                    filename='meeting-decision-'+date.today().isoformat()+'.md'
-                    note=f"# Group meeting decision\n\nTopic: {q}\n\n{decision.strip()}\n"
-                    references=dict.fromkeys((s['file'],s['page']) for pt in result['points'] for s in pt['sources'])
-                    if references:
-                        note+='\nSources shown in the meeting workspace\n'+''.join(f'- {name}, p. {page}\n' for name,page in references)
-                    save_documents([(filename,note.encode())])
-                    st.session_state[decision_key]=decision.strip()
-                    st.session_state["new-meeting-record"]=filename
-                    st.rerun()
-                else:st.info("Enter the agreed decision before saving.")
+        if not active_demo:
+            with notes_tab:
+                st.subheader("Record a meeting decision")
+                with st.form('meeting-decision-'+decision_key):
+                    decision=st.text_area("Decision agreed by the group",placeholder="Which action did you agree to, and who will follow up?")
+                    save_decision=st.form_submit_button("Save decision to local library")
+                if save_decision:
+                    if decision.strip():
+                        filename='meeting-decision-'+date.today().isoformat()+'.md'
+                        note=f"# Group meeting decision\n\nTopic: {q}\n\n{decision.strip()}\n"
+                        references=dict.fromkeys((s['file'],s['page']) for pt in result['points'] for s in pt['sources'])
+                        if references:
+                            note+='\nSources shown in the meeting workspace\n'+''.join(f'- {name}, p. {page}\n' for name,page in references)
+                        save_documents([(filename,note.encode())])
+                        st.session_state[decision_key]=decision.strip()
+                        st.session_state["new-meeting-record"]=filename
+                        st.rerun()
+                    else:st.info("Enter the agreed decision before saving.")
 
+            def cited_pdfs():
+                cited={source['file'] for point in result['points'] for source in point['sources']}
+                return {name:content for name in cited & pdf_names if (content:=source_pdf(name))}
+
+            save_current_demo(save_panel,activity,f"{task_names[mode]} · {q[:80]}",
+                              dict(mode=mode,question=q,result=result,agreed=agreed),cited_pdfs)
         with demo_trace.expander("Lab tool calls"):st.json(result['tools'])
+    elif not active_demo:
+        save_current_demo(save_panel,activity)
     st.stop()
 samples=sorted(manifest(2025),key=lambda r:(r["id"]!="k2ZVAzVeMP",r["title"]))
 def select_manuscript(title):
     st.session_state["current_manuscript"]=title
 
-featured=next((r['title'] for r in samples if r['id']=='k2ZVAzVeMP'),None)
-if featured and st.session_state.get("current_manuscript")!=featured:
-    demo_inputs.button("Use Switch SAE example",on_click=select_manuscript,args=(featured,))
-
-selection=demo_inputs.selectbox("Public example manuscript",["Upload a PDF"]+[r['title'] for r in samples],
-    format_func=lambda title:"Use my uploaded PDF" if title=="Upload a PDF" else title,key="current_manuscript")
-sample=next((r for r in samples if r['title']==selection),None)
-if sample:
-    content=(DATA/'iclr2025'/(sample['id']+'.pdf')).read_bytes()
-    inputs_panel.caption("Public example manuscript")
-    inputs_panel.subheader(sample['title'])
-    demo_inputs.button("Use my own PDF",on_click=select_manuscript,args=("Upload a PDF",))
-    if sample.get('version'):demo_inputs.caption(sample['version'])
-    if sample.get('timing_audit')=='PDF created on or after first review':
-        demo_inputs.caption("This example PDF was generated after reviewing began and may contain revisions.")
+if active_demo:
+    manuscript_title=saved_view["title"]
+    content=active_demo["files"]["manuscript"]
+    sample=next((r for r in samples if r["id"]==saved_view.get("sample_id")),None)
+    inputs_panel.subheader(manuscript_title)
 else:
-    f=inputs_panel.file_uploader("Upload your manuscript",type="pdf",key="uploaded-manuscript")
-    if not f:st.stop()
-    content=f.getvalue()
+    featured=next((r['title'] for r in samples if r['id']=='k2ZVAzVeMP'),None)
+    if featured and st.session_state.get("current_manuscript")!=featured:
+        demo_inputs.button("Use Switch SAE example",on_click=select_manuscript,args=(featured,))
+
+    selection=demo_inputs.selectbox("Public example manuscript",["Upload a PDF"]+[r['title'] for r in samples],
+        format_func=lambda title:"Use my uploaded PDF" if title=="Upload a PDF" else title,key="current_manuscript")
+    sample=next((r for r in samples if r['title']==selection),None)
+    if sample:
+        content=(DATA/'iclr2025'/(sample['id']+'.pdf')).read_bytes()
+        inputs_panel.caption("Public example manuscript")
+        inputs_panel.subheader(sample['title'])
+        demo_inputs.button("Use my own PDF",on_click=select_manuscript,args=("Upload a PDF",))
+        if sample.get('version'):demo_inputs.caption(sample['version'])
+        if sample.get('timing_audit')=='PDF created on or after first review':
+            demo_inputs.caption("This example PDF was generated after reviewing began and may contain revisions.")
+    else:
+        f=inputs_panel.file_uploader("Upload your manuscript",type="pdf",key="uploaded-manuscript")
+        if not f:
+            save_current_demo(save_panel,activity)
+            st.stop()
+        content=f.getvalue()
+    manuscript_title=sample["title"] if sample else f.name
 try:paper=parse_pdf(content)
 except Exception as exc:st.error(str(exc));st.stop()
 venues=['ICLR','NeurIPS']
-if activity=="Manuscript review":
-    venue=st.sidebar.selectbox("Target venue",venues,index=venues.index(st.session_state.get('last_review_venue','ICLR')),key="review_venue")
-    st.session_state['last_review_venue']=venue
-cutoff=st.sidebar.date_input("Prior work published before",value=date(2024,10,1) if sample else date.today())
+if active_demo:
+    venue=saved_view.get("venue")
+    cutoff=date.fromisoformat(saved_view["before"])
+    inputs_panel.caption(" · ".join(filter(None,[venue,"Prior work before "+cutoff.isoformat()])))
+else:
+    if activity=="Manuscript review":
+        venue=st.sidebar.selectbox("Target venue",venues,index=venues.index(st.session_state.get('last_review_venue','ICLR')),key="review_venue")
+        st.session_state['last_review_venue']=venue
+    cutoff=st.sidebar.date_input("Prior work published before",value=date(2024,10,1) if sample else date.today())
 if activity=="Rebuttal":
-    inputs_panel.subheader("Reviewer comments")
-    if sample:paper['title']=sample['title']
-    example=""
-    if sample:
-        truth_path=DATA/'truth-labels'/(sample['id']+'.json')
-        if truth_path.exists() and demo_inputs.checkbox("Use an actual reviewer comment"):
-            example=json.loads(truth_path.read_text())[0]['quote']
-    text=inputs_panel.text_area("Paste reviewer comments",value=example,key=f"reviewer-comments-{paper['hash']}-{bool(example)}")
-    reply_action,works_action=inputs_panel.columns([1,1])
-    replay_file=DATA/'rebuttal-replays'/(paper['hash']+'-'+hashlib.sha256(text.encode()).hexdigest()+'.json')
-    comment_hash=hashlib.sha256(text.encode()).hexdigest()
-    rkey=f"rebuttal-{paper['hash']}-{cutoff}-{comment_hash}"
-    for prefix in ('','works-'):
-        if prefix+rkey not in st.session_state:
-            for previous in dict.fromkeys([st.session_state.get('last_review_venue','ICLR'),*venues]):
-                old=f"{prefix}{paper['hash']}-{previous}-{cutoff}{comment_hash}"
-                if old in st.session_state:
-                    st.session_state[prefix+rkey]=st.session_state[old]
-                    break
-    reply_inputs=[paper['hash'],comment_hash]
-    works_inputs=[*reply_inputs,cutoff.isoformat()]
-    run_works,show_works=action_buttons("Check works mentioned by the reviewer","rebuttal-works",
-        demo_panel=demo_actions,demo_label="Load saved reference check",live_panel=works_action,available=demo_path('works',works_inputs).is_file(),disabled=not text.strip())
-    if run_works or show_works:
-        reading=(load_demo('works',works_inputs) if show_works else call(inspect_comparison(paper,text,cutoff.isoformat(),ask)))
-        st.session_state['works-'+rkey]=reading
-        st.session_state['works-demo-'+rkey]=show_works
-        if run_works and reading:
-            remember_demo('works',works_inputs,reading)
-            st.rerun()
-    run_reply,show_reply=action_buttons("Draft point-by-point reply","rebuttal-reply",
-        demo_panel=demo_actions,demo_label="Load saved rebuttal draft",live_panel=reply_action,primary=True,available=demo_path('reply',reply_inputs).is_file() or replay_file.is_file(),disabled=not text.strip())
-    if run_reply or show_reply:
-        if run_reply:
-            reply=call(rebuttal(paper,text))
-            if reply:remember_demo('reply',reply_inputs,reply)
-        else:
-            reply=load_demo('reply',reply_inputs)
-            if reply is None:
-                stored=json.loads(replay_file.read_bytes())
-                if [stored['manuscript_sha256'],stored['review_sha256']]==reply_inputs:
-                    reply=stored['result']
-                else:st.warning("Saved reply does not match this manuscript and comment.")
-        st.session_state[rkey]=reply
-        st.session_state['reply-demo-'+rkey]=show_reply
-        if run_reply and reply:st.rerun()
-    result=st.session_state.get(rkey)
-    reading=st.session_state.get('works-'+rkey)
+    if active_demo:
+        rkey=f"named-rebuttal-{active_demo['id']}"
+        result=saved_view["reply"]
+        reading=saved_view["reading"]
+        inputs_panel.subheader("Reviewer comments")
+        inputs_panel.write(saved_view["comment"])
+    else:
+        inputs_panel.subheader("Reviewer comments")
+        if sample:paper['title']=sample['title']
+        example=""
+        if sample:
+            truth_path=DATA/'truth-labels'/(sample['id']+'.json')
+            if truth_path.exists() and demo_inputs.checkbox("Use an actual reviewer comment"):
+                example=json.loads(truth_path.read_text())[0]['quote']
+        text=inputs_panel.text_area("Paste reviewer comments",value=example,key=f"reviewer-comments-{paper['hash']}-{bool(example)}")
+        reply_action,works_action=inputs_panel.columns([1,1])
+        replay_file=DATA/'rebuttal-replays'/(paper['hash']+'-'+hashlib.sha256(text.encode()).hexdigest()+'.json')
+        comment_hash=hashlib.sha256(text.encode()).hexdigest()
+        rkey=f"rebuttal-{paper['hash']}-{cutoff}-{comment_hash}"
+        for prefix in ('','works-'):
+            if prefix+rkey not in st.session_state:
+                for previous in dict.fromkeys([st.session_state.get('last_review_venue','ICLR'),*venues]):
+                    old=f"{prefix}{paper['hash']}-{previous}-{cutoff}{comment_hash}"
+                    if old in st.session_state:
+                        st.session_state[prefix+rkey]=st.session_state[old]
+                        break
+        reply_inputs=[paper['hash'],comment_hash]
+        works_inputs=[*reply_inputs,cutoff.isoformat()]
+        run_works,show_works=action_buttons("Check works mentioned by the reviewer","rebuttal-works",
+            demo_panel=demo_actions,demo_label="Load saved reference check",live_panel=works_action,available=demo_path('works',works_inputs).is_file(),disabled=not text.strip())
+        if run_works or show_works:
+            reading=(load_demo('works',works_inputs) if show_works else call(inspect_comparison(paper,text,cutoff.isoformat(),ask)))
+            st.session_state['works-'+rkey]=reading
+            st.session_state['works-demo-'+rkey]=show_works
+            if run_works and reading:
+                remember_demo('works',works_inputs,reading)
+                st.rerun()
+        run_reply,show_reply=action_buttons("Draft point-by-point reply","rebuttal-reply",
+            demo_panel=demo_actions,demo_label="Load saved rebuttal draft",live_panel=reply_action,primary=True,available=demo_path('reply',reply_inputs).is_file() or replay_file.is_file(),disabled=not text.strip())
+        if run_reply or show_reply:
+            if run_reply:
+                reply=call(rebuttal(paper,text))
+                if reply:remember_demo('reply',reply_inputs,reply)
+            else:
+                reply=load_demo('reply',reply_inputs)
+                if reply is None:
+                    stored=json.loads(replay_file.read_bytes())
+                    if [stored['manuscript_sha256'],stored['review_sha256']]==reply_inputs:
+                        reply=stored['result']
+                    else:st.warning("Saved reply does not match this manuscript and comment.")
+            st.session_state[rkey]=reply
+            st.session_state['reply-demo-'+rkey]=show_reply
+            if run_reply and reply:st.rerun()
+        result=st.session_state.get(rkey)
+        reading=st.session_state.get('works-'+rkey)
+        view=(dict(title=manuscript_title,sample_id=sample['id'] if sample else None,
+                   before=cutoff.isoformat(),comment=text,reply=result,reading=reading)
+              if result or reading else None)
+        save_current_demo(save_panel,activity,manuscript_title,view,lambda:{"manuscript":content})
     steps=experiment_checklist(result['responses']) if result else []
     if result:
         names=["Response draft","Evidence and references"]+(["Experiment checklist"] if steps else [])
@@ -812,97 +870,105 @@ if activity=="Rebuttal":
             panels["Experiment checklist"].write(action)
 
     st.stop()
-key=f"{paper['hash']}-{venue}-{cutoff}"
-run_panel,read_panel=inputs_panel.columns([1,1])
-scope_key='scope-'+paper['hash']
-scope=st.session_state.get(scope_key)
-review_inputs=[paper['hash'],venue,cutoff.isoformat()]
-saved_review_path=review_demo_path(*review_inputs,sample_id=sample['id'] if sample else None)
-saved_scope=read_scope_demo(paper['hash'],saved_review_path,venue,cutoff.isoformat())
-reading_job='reading-'+paper['hash']
-future=st.session_state.get(reading_job)
-read_live,read_demo=action_buttons("Read claims and experimental settings","manuscript-reading",
-    live_panel=read_panel,demo_panel=demo_actions,demo_label="Load saved manuscript reading",available=saved_scope is not None,disabled=future is not None)
-if read_demo:
-    scope=st.session_state[scope_key]=saved_scope
-    st.session_state[scope_key+'-demo']=True
-if read_live or future is not None:
-    if read_live:
-        st.session_state[scope_key+'-demo']=False
+if active_demo:
+    key=f"named-review-{active_demo['id']}"
+    scope_key=key+'-scope'
+    scope=saved_view.get("scope")
+    result=saved_view.get("review")
+else:
+    key=f"{paper['hash']}-{venue}-{cutoff}"
+    run_panel,read_panel=inputs_panel.columns([1,1])
+    scope_key='scope-'+paper['hash']
+    scope=st.session_state.get(scope_key)
+    review_inputs=[paper['hash'],venue,cutoff.isoformat()]
+    saved_review_path=review_demo_path(*review_inputs,sample_id=sample['id'] if sample else None)
+    saved_scope=read_scope_demo(paper['hash'],saved_review_path,venue,cutoff.isoformat())
+    reading_job='reading-'+paper['hash']
+    future=st.session_state.get(reading_job)
+    read_live,read_demo=action_buttons("Read claims and experimental settings","manuscript-reading",
+        live_panel=read_panel,demo_panel=demo_actions,demo_label="Load saved manuscript reading",available=saved_scope is not None,disabled=future is not None)
+    if read_demo:
+        scope=st.session_state[scope_key]=saved_scope
+        st.session_state[scope_key+'-demo']=True
+    if read_live or future is not None:
+        if read_live:
+            st.session_state[scope_key+'-demo']=False
+            pool=ThreadPoolExecutor(max_workers=1)
+            future=pool.submit(asyncio.run,inspect_manuscript(paper))
+            pool.shutdown(wait=False)
+            st.session_state[reading_job]=future
+        if future is not None and future.done():
+            del st.session_state[reading_job]
+            try:
+                claims,paper_type,settings=future.result()
+                scope=dict(manuscript_sha256=paper['hash'],claims=claims,paper_type=paper_type,settings=settings,declared_limitations=declared_limitations(paper))
+                st.session_state[scope_key]=scope
+                remember_demo("reading",[paper["hash"]],scope)
+                st.rerun()
+            except Exception as exc:
+                st.session_state[reading_job+'-error']=str(exc)
+                st.rerun()
+        elif future is not None:
+            @st.fragment(run_every=2)
+            def reading_progress():
+                if future.done():st.rerun()
+                st.caption("Reading claims and checking them against the PDF…")
+            reading_progress()
+    if reading_error:=st.session_state.pop(reading_job+'-error',None):
+        st.error(f"The manuscript reading could not finish. {reading_error}")
+    jobkey="job-"+key
+    job=st.session_state.get(jobkey)
+    run_live,run_demo=action_buttons("Run three reviewers","manuscript-review",live_panel=run_panel,demo_panel=demo_actions,demo_label="Load saved review",available=saved_review_path is not None,
+        disabled=job is not None,primary=True)
+    if run_demo:
+        st.session_state.pop(key+'-chair-demo',None)
+        st.session_state[key]=read_review_demo(saved_review_path,*review_inputs)
+        st.session_state[key+'-demo']=True
+    if run_live:
+        st.session_state.pop(key+'-chair-demo',None)
+        st.session_state[key+'-demo']=False
+        st.session_state.pop(key,None)
+        updates=Queue()
         pool=ThreadPoolExecutor(max_workers=1)
-        future=pool.submit(asyncio.run,inspect_manuscript(paper))
+        future=pool.submit(asyncio.run,run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put))
         pool.shutdown(wait=False)
-        st.session_state[reading_job]=future
-    if future is not None and future.done():
-        del st.session_state[reading_job]
+        st.session_state[jobkey]=dict(future=future,updates=updates,events=[],started=time.monotonic())
+        st.rerun()
+    if job and not job['future'].done():
+        @st.fragment(run_every=1)
+        def progress_panel():
+            while True:
+                try:event=job['updates'].get_nowait()
+                except Empty:break
+                if isinstance(event,dict) and 'fraction' in event:
+                    job['stage']=event
+                else:job['events'].append(event)
+            if job['future'].done():st.rerun()
+            elapsed=int(time.monotonic()-job['started'])
+            stage=job.get('stage',dict(fraction=0.,label="Starting review"))
+            st.progress(stage['fraction'],text=f"{stage['label']} · {elapsed} s")
+            for event in job['events']:
+                if isinstance(event,dict):
+                    with st.container(border=True):
+                        st.markdown('**'+event['role']+'**')
+                        st.write(event['report'].get('summary',''))
+                else:st.caption(event)
+        progress_panel()
+    if job and job['future'].done():
         try:
-            claims,paper_type,settings=future.result()
-            scope=dict(manuscript_sha256=paper['hash'],claims=claims,paper_type=paper_type,settings=settings,declared_limitations=declared_limitations(paper))
-            st.session_state[scope_key]=scope
-            remember_demo("reading",[paper["hash"]],scope)
-            st.rerun()
-        except Exception as exc:
-            st.session_state[reading_job+'-error']=str(exc)
-            st.rerun()
-    elif future is not None:
-        @st.fragment(run_every=2)
-        def reading_progress():
-            if future.done():st.rerun()
-            st.caption("Reading claims and checking them against the PDF…")
-        reading_progress()
-if reading_error:=st.session_state.pop(reading_job+'-error',None):
-    st.error(f"The manuscript reading could not finish. {reading_error}")
-jobkey="job-"+key
-job=st.session_state.get(jobkey)
-run_live,run_demo=action_buttons("Run three reviewers","manuscript-review",live_panel=run_panel,demo_panel=demo_actions,demo_label="Load saved review",available=saved_review_path is not None,
-    disabled=job is not None,primary=True)
-if run_demo:
-    st.session_state.pop(key+'-chair-demo',None)
-    st.session_state[key]=read_review_demo(saved_review_path,*review_inputs)
-    st.session_state[key+'-demo']=True
-if run_live:
-    st.session_state.pop(key+'-chair-demo',None)
-    st.session_state[key+'-demo']=False
-    st.session_state.pop(key,None)
-    updates=Queue()
-    pool=ThreadPoolExecutor(max_workers=1)
-    future=pool.submit(asyncio.run,run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put))
-    pool.shutdown(wait=False)
-    st.session_state[jobkey]=dict(future=future,updates=updates,events=[],started=time.monotonic())
-    st.rerun()
-if job and not job['future'].done():
-    @st.fragment(run_every=1)
-    def progress_panel():
-        while True:
-            try:event=job['updates'].get_nowait()
-            except Empty:break
-            if isinstance(event,dict) and 'fraction' in event:
-                job['stage']=event
-            else:job['events'].append(event)
-        if job['future'].done():st.rerun()
-        elapsed=int(time.monotonic()-job['started'])
-        stage=job.get('stage',dict(fraction=0.,label="Starting review"))
-        st.progress(stage['fraction'],text=f"{stage['label']} · {elapsed} s")
-        for event in job['events']:
-            if isinstance(event,dict):
-                with st.container(border=True):
-                    st.markdown('**'+event['role']+'**')
-                    st.write(event['report'].get('summary',''))
-            else:st.caption(event)
-    progress_panel()
-if job and job['future'].done():
-    try:
-        completed=job['future'].result()
-        st.session_state[key]=completed
-        if not completed['meta_review'].get('error'):
-            remember_demo('review',review_inputs,completed)
-    except Exception as exc:st.session_state[jobkey+'-error']=str(exc)
-    del st.session_state[jobkey]
-    st.rerun()
-if error:=st.session_state.pop(jobkey+'-error',None):st.error(error)
-result=st.session_state.get(key)
+            completed=job['future'].result()
+            st.session_state[key]=completed
+            if not completed['meta_review'].get('error'):
+                remember_demo('review',review_inputs,completed)
+        except Exception as exc:st.session_state[jobkey+'-error']=str(exc)
+        del st.session_state[jobkey]
+        st.rerun()
+    if error:=st.session_state.pop(jobkey+'-error',None):st.error(error)
+    result=st.session_state.get(key)
 if result:
-    if st.session_state.get(key+"-demo"):
+    if active_demo:
+        st.badge("Saved manuscript review",icon=":material/history:",color="violet")
+    elif st.session_state.get(key+"-demo"):
         st.badge("Saved example review",icon=":material/history:",color="violet")
     else:
         st.progress(1.0,text="Review complete · 3/3 reviewers finished")
@@ -914,7 +980,7 @@ if result:
     overview.subheader("Area chair recommendation")
     meta=result['meta_review']
     if st.session_state.get(key+'-chair-demo'):overview.caption("Demo · saved area chair recommendation")
-    if meta.get('rationale_version')!=2:
+    if not active_demo and meta.get('rationale_version')!=2:
         chair_key=chair_inputs(review_inputs,result)
         saved_chair=load_demo('chair',chair_key)
         run_chair,show_chair=action_buttons(f"Generate AC recommendation with {model_label}","manuscript-chair",
@@ -998,8 +1064,9 @@ if result:
                 prepare=st.form_submit_button("Prepare author notes")
             if prepare:
                 st.session_state[notes_key+'-prepared']=author_question_notes(
-                    meeting_notes,manuscript=sample['title'] if sample else f.name,pdf_sha256=paper['hash'])
-            if prepared:=st.session_state.get(notes_key+'-prepared'):
+                    meeting_notes,manuscript=manuscript_title,pdf_sha256=paper['hash'])
+            prepared=st.session_state.get(notes_key+'-prepared') or (saved_view.get("author_notes") if active_demo else None)
+            if prepared:
                 st.download_button("Download prepared author notes",prepared,f"author-questions-{paper['hash'][:12]}.md",on_click="ignore")
     overview.subheader("Reviewer assessments")
     raw=demo_trace.toggle("Show raw reviewer weaknesses",key="raw-weaknesses-"+key)
@@ -1035,7 +1102,7 @@ if result:
                         st.write(observation['quote'])
     with reports_panel:
         reviews=result['reviews']
-        index=st.radio("Reviewer",range(len(reviews)),format_func=lambda i:reviews[i]['role'],horizontal=True,key="reviewer-detail-"+key)
+        index=st.radio("Reviewer",range(len(reviews)),index=saved_view.get("reviewer",0) if active_demo else 0,format_func=lambda i:reviews[i]['role'],horizontal=True,key="reviewer-detail-"+key)
         report=reviews[index]['report']
         render_weaknesses(report,f"{key}-{index}")
         if report.get('summary') or report.get('score_rationale'):
@@ -1266,3 +1333,13 @@ with evidence_panel:
     if paper.get('sections'):
         st.subheader("Manuscript sections")
         st.dataframe([{'Section':s['heading'],'First page':s['start_page'],'Last page':s['end_page']} for s in paper['sections']],hide_index=True)
+
+if not active_demo:
+    view=None
+    if result or scope is not None:
+        view=dict(title=manuscript_title,sample_id=sample['id'] if sample else None,
+                  before=cutoff.isoformat(),venue=venue,review=result,scope=scope)
+        if result:
+            view["reviewer"]=index
+            if questions:view["author_notes"]=st.session_state.get(notes_key+'-prepared')
+    save_current_demo(save_panel,activity,manuscript_title,view,lambda:{"manuscript":content})

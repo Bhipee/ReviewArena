@@ -8,7 +8,9 @@ import streamlit as st
 from .demo_ui import action_buttons, remember_demo
 from .demos import demo_path, fingerprint, load_demo, summary_inputs
 from .kb import DATA
-from .library import document, read_documents
+from .library import document, read_documents, saved_source
+from .summary_store import saved_reference
+from .named_demo_ui import save_current_demo
 from .paper_summary import DEFAULT_PROMPT, summarize
 from .summary_store import (
     history,
@@ -71,7 +73,7 @@ def render_examples(loaded, key):
     return examples
 
 
-def render_summary(files, selected, model_label, demo_inputs, demo_actions):
+def render_summary(files, selected, model_label, demo_inputs, demo_actions, save_panel):
     choices = {
         f"{name} [{digest[:8]}]": (name, digest, None) for name, digest in selected
     }
@@ -208,7 +210,47 @@ def render_summary(files, selected, model_label, demo_inputs, demo_actions):
         summary_tab.caption("Saved summary for these instructions")
         summary_tab.markdown(archived)
     with history_tab:
-        render_history()
+        record = render_history()
+
+    current = None
+    if preview or archived:
+        title, digest, content = choices[target]
+        current = dict(
+            mode="summary", title=title, summary=preview or archived, prompt=prompt,
+            examples=[{k: e[k] for k in ("name", "summary") if k in e} for e in examples],
+        )
+    historical = None
+    if record:
+        history_examples = json.loads(record["examples"])
+        history_inputs = summary_inputs(record["digest"], record["prompt"], history_examples)
+        if current is None or inputs != history_inputs or current["summary"] != record["summary"]:
+            historical = dict(mode="summary", title=record["name"], summary=record["summary"],
+                              prompt=record["prompt"], examples=history_examples, model=record["model"])
+
+    if current is None and historical is None:
+        save_current_demo(save_panel, "Lab meeting")
+        return
+    use_history = current is None
+    if current and historical:
+        use_history = save_panel.radio("Summary to save", ["Current summary", "Selected history entry"],
+                                       horizontal=True) == "Selected history entry"
+    if use_history:
+        save_panel.caption(f"From summary history · {historical['title']}")
+    view = historical if use_history else current
+
+    def attachments():
+        if use_history:
+            main = saved_source(record["digest"])
+            references = [saved_reference(e["digest"]) if e.get("digest") else None for e in history_examples]
+        else:
+            main = content if content is not None else saved_source(digest)
+            references = [e.get("content") for e in examples]
+        files = {f"example-{i}": raw for i, raw in enumerate(references, 1) if raw is not None}
+        if main is not None:
+            files["paper"] = main
+        return files
+
+    save_current_demo(save_panel, "Lab meeting", view["title"], view, attachments)
 
 
 def render_history():
@@ -253,3 +295,24 @@ def render_history():
             if e.get("name"):
                 st.caption(e["name"])
             st.write(e["summary"])
+    return record
+
+
+def render_saved_summary(view, files):
+    st.subheader(view["title"])
+    summary, instructions = st.tabs(["Summary", "Instructions and examples"])
+    summary.markdown(view["summary"])
+    if "paper" in files:
+        summary.download_button("Download source paper", files["paper"], file_name=view["title"], on_click="ignore")
+    instructions.markdown("**Summary instructions**")
+    instructions.write(view["prompt"])
+    if view.get("model"):
+        instructions.caption(f"Model · {view['model']}")
+    for i, example in enumerate(view["examples"], 1):
+        instructions.markdown(f"**Example {i}**")
+        if example.get("name"):
+            instructions.caption(example["name"])
+        instructions.write(example["summary"])
+        if (raw := files.get(f"example-{i}")) is not None:
+            instructions.download_button("Download reference paper", raw, file_name=example["name"],
+                                         key=f"demo-summary-reference-{i}", on_click="ignore")

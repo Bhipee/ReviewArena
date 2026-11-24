@@ -97,6 +97,17 @@ def list_templates(path=HISTORY):
         ).fetchall()
 
 
+def saved_reference(digest, path=HISTORY, library_path=DEFAULT_PATH):
+    """Read the original reference attached to a historical summary."""
+    if path.is_file():
+        with closing(sqlite3.connect(path)) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='summary_references'").fetchone():
+                row = db.execute("SELECT content FROM summary_references WHERE digest=?", (digest,)).fetchone()
+                if row:
+                    return row[0]
+    return saved_source(digest, library_path)
+
+
 def restore_examples(db, encoded, library_path):
     examples = json.loads(encoded)
     for example in examples:

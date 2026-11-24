@@ -122,6 +122,8 @@ Pass PDF bytes or a local file path to `reviewarena.api.retrieve_candidates`, `v
 
 ### ForDemo
 
+In **Reviewer reports**, select a reviewer to read their weaknesses and cited passages. The **Show raw reviewer weaknesses** switch inside **ForDemo** displays the original fields for comparison.
+
 The main workspace runs the configured model. Open the collapsed **ForDemo** panel to select public examples and load saved outputs for the current inputs. In Manuscript review, historical retrieval details and the published decision are also available there. Running a main action successfully prepares a demo for those inputs. For paper summaries this includes the instructions and any example summaries and reference papers. A disabled replay button means no saved result is available for those inputs.
 
 With the public project data available and the local model running, prepare the classroom examples ahead of time:
@@ -169,7 +171,7 @@ In **Rebuttal**, upload the manuscript, enter the reviewer's comment and select 
 
 In **Corpus**, open **Historical reviewer request · ConViT and CoAtNet** for a public example. Regenerate its official arXiv records with `./.venv/bin/python pipeline/publication_record.py 2103.10697 2106.04803`, then reproduce the source check with `./.venv/bin/python eval/comparison_demo.py`.
 
-In a manuscript review, open **Open questions for the authors** to see unresolved checks anchored to the current draft. Enter a page, an experiment or a revision decision, select **Prepare author notes**, and download the notes for the next meeting. These questions are excluded from verified weaknesses and acceptance statistics.
+In a manuscript review, select the **Author questions** tab to see unresolved checks anchored to the current draft. Enter a page, an experiment or a revision decision, select **Prepare author notes**, and download the notes for the next meeting. These questions are excluded from verified weaknesses and acceptance statistics.
 
 ### Check claim coverage in retrieval
 
@@ -181,4 +183,4 @@ When a verifier partially answers an author question, the revision notes include
 
 For a weekly brief, select the notes or other records documenting the group's own work. Completed activities are quoted from those records. With no meeting records selected, research papers supply the material for a literature discussion. Download the brief to retain its source passages, or record an agreed decision in the local library for the next meeting. The public example uses observed results from the project's 20-question evaluation. Rebuild it with `./.venv/bin/python eval/lab_weekly.py`.
 
-In **Open questions for the authors**, select **Compare question wording with historical reviews** to see the exact reviewer quotation and the historical question used for retrieval. The rank compares each proposed question with the same manuscript’s retrieved candidate checks. A low rank signals a possible change in the scientific question. The downloaded notes preserve the source and rank.
+In **ForDemo**, select **Compare question wording with historical reviews** to see the exact reviewer quotation and the historical question used for retrieval. The rank compares each proposed question with the same manuscript’s retrieved candidate checks. A low rank signals a possible change in the scientific question. The downloaded notes preserve the source and rank.

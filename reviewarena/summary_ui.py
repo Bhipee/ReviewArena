@@ -41,7 +41,8 @@ def render_examples(loaded, key):
     examples = []
     for i in range(count):
         previous = loaded[i] if i < len(loaded) else {}
-        with st.expander(f"Example {i+1}", expanded=True):
+        with st.container(border=True):
+            st.markdown(f"**Example {i+1}**")
             attachment = {
                 k: previous[k] for k in ("name", "digest", "content") if k in previous
             }
@@ -89,7 +90,8 @@ def render_summary(files, selected, model_label, demo_inputs, demo_actions):
             ),
             **choices,
         }
-    target = st.selectbox(
+    summary_tab, templates_tab, history_tab = st.tabs(["Summary", "Instructions and templates", "History"])
+    target = summary_tab.selectbox(
         "Paper to summarize",
         list(choices),
         placeholder="Upload a paper or select one from the library",
@@ -102,7 +104,7 @@ def render_summary(files, selected, model_label, demo_inputs, demo_actions):
         st.warning(
             "These older references need to be reattached: " + ", ".join(missing)
         )
-    with st.expander("Summary instructions, examples and saved templates"):
+    with templates_tab:
         if templates:
             if pick := st.session_state.pop("lab-summary-select-template", None):
                 st.session_state["lab-summary-picker"] = pick
@@ -165,7 +167,7 @@ def render_summary(files, selected, model_label, demo_inputs, demo_actions):
     run, demo = action_buttons(
         "Generate and save summary",
         "paper-summary",
-        demo_panel=demo_actions, demo_label="Load saved paper summary", primary=True,
+        demo_panel=demo_actions, demo_label="Load saved paper summary", live_panel=summary_tab, primary=True,
         available=archived is not None or has_local,
         disabled=not target or not valid or missing_reference,
     )
@@ -200,9 +202,13 @@ def render_summary(files, selected, model_label, demo_inputs, demo_actions):
         except Exception as exc:
             st.error(f"Could not generate and save the summary. {exc}")
     if preview := st.session_state.get(preview_key):
-        st.caption("Demo · saved paper summary")
-        st.markdown(preview)
-    render_history()
+        summary_tab.caption("Demo · saved paper summary")
+        summary_tab.markdown(preview)
+    elif archived:
+        summary_tab.caption("Saved summary for these instructions")
+        summary_tab.markdown(archived)
+    with history_tab:
+        render_history()
 
 
 def render_history():
@@ -238,7 +244,8 @@ def render_history():
         ] = f"Created template #{template_id} from summary #{selected_id}."
         st.session_state["lab-summary-missing-references"] = missing
         st.rerun()
-    with st.expander("Instructions and examples used"):
+    with st.container(border=True):
+        st.markdown("**Instructions used for this summary**")
         st.caption(f"Model · {record['model']}")
         st.write(record["prompt"])
         for i, e in enumerate(json.loads(record["examples"]), 1):

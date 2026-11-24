@@ -24,7 +24,17 @@ def workspace_style():
         .st-key-demo-panel [data-testid="stExpander"] summary {
             background: color-mix(in srgb, #9a86b9 8%, transparent);
         }
-        .st-key-author-followup summary {border-inline-start: 3px solid #b5781b}
+        [data-testid="stTabs"] [role="tablist"] {gap: .45rem; border-bottom: 1px solid var(--ra-line)}
+        [data-testid="stTabs"] [role="tab"] {padding-inline: .85rem; white-space: nowrap}
+        [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+            color: var(--text-color); background: color-mix(in srgb, #428975 12%, transparent);
+            border-radius: .45rem .45rem 0 0;
+        }
+        [class*="st-key-weakness-card-"] {border-inline-start: 3px solid #ad7831}
+        .ra-finding {margin: 0; font-size: 1.05rem; font-weight: 600; line-height: 1.55; overflow-wrap: anywhere}
+        .ra-excerpt {margin: 0; padding: .7rem 1rem; border-inline-start: 2px solid #648b84;
+            background: color-mix(in srgb, #648b84 7%, transparent); overflow-wrap: anywhere}
+
         .st-key-workspace-inputs [data-testid="stFileUploaderDropzone"] {
             border: 1.5px dashed color-mix(in srgb, #357766 65%, var(--ra-line));
             background: color-mix(in srgb, #488e79 5%, transparent); padding: 1.15rem;

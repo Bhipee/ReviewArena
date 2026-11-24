@@ -30,7 +30,7 @@ st.set_page_config(page_title="ReviewArena",layout="wide")
 workspace_style()
 with st.sidebar.container(key="brand"):
     st.markdown("ReviewArena")
-activity=st.sidebar.radio("Workspace",["Manuscript review","Rebuttal","Lab meeting"])
+activity=st.sidebar.radio("Workspace",["Manuscript review","Rebuttal"])
 st.title(activity)
 purpose={
     "Manuscript review":"Review your draft, see the area chair’s recommendation and check the evidence behind it.",

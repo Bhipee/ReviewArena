@@ -1,4 +1,5 @@
 import asyncio,re
+from . import diagnostics
 from datetime import date
 from .consistency import check_manuscript
 from .comparisons import comparison_reviews
@@ -10,7 +11,7 @@ from .severity import check_rating
 from .novelty import compare_contributions
 from .prior_work import discover
 from .kb import ROOT,outcomes,current_snapshot
-from .model import ModelJSONError,generate
+from .model import ModelJSONError,bounded_model_map,generate
 from .tools import connect
 from .protocol import protocol
 from .named_works import verify_comparisons
@@ -232,7 +233,7 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
                 claims=claims,observation=finding['statement'])
             if result.get('reach') in ('central','replication','limited') and isinstance(result.get('mechanism'),str):
                 return dict(**finding,reach=result['reach'],mechanism=result['mechanism'])
-        ranked=await asyncio.gather(*(assess(f) for f in findings))
+        ranked=await bounded_model_map(findings,assess,limit=2)
         for f in filter(None,ranked):
             findings[f['id']-1]=f
     prompt=skill('area-chair')
@@ -305,6 +306,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
     if method not in 'ABCD' or len(method)!=1:raise ValueError("Unknown evaluation method")
     if venue not in ('ICLR','NeurIPS'):raise ValueError("Unknown venue")
     def stage(units,label):
+        diagnostics.stage(label)
         if on_stage:
             on_stage(dict(fraction=units/8,label=label))
 
@@ -373,6 +375,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
     stage(4,f"Investigating and scoring · 0/{total} reviewers finished")
     async def review(i,role):
         nonlocal completed_reviewers
+        diagnostics.stage(role)
         assigned=[dict(critique_id=r['candidate']['id'],category=r['candidate']['category'],historical_issue=r['candidate']['critique_text'],target_question=r['candidate'].get('target_question'),current_evidence=r['evidence'],status=r['status']) for r in groups[i]]
         rubric=RUBRICS[venue]
         if method=='D':
@@ -490,6 +493,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
     try:
         meta=await chair_recommendation(venue,reports,claims,novelty=novelty,research_value=research_value)
     except ValueError as exc:
+        diagnostics.failure(exc, "chair_failure")
         meta=dict(error=str(exc))
     return dict(method=method,venue=venue,reviewer_panel=list(REVIEWER_ROLES),research_value=research_value,contribution_comparisons=novelty,prior_searches=searches,manuscript_conflicts=conflicts,rubric=dict(year=2025,score_labels=SCORE_LABELS[venue],**RUBRICS[venue]),comparison_reviews=contexts if method=='D' else [],request=dict(manuscript_sha256=paper.get('hash'),before=before),protocol=stamp,claims=claims,declared_limitations=declared_limitations(paper),paper_type=paper_type,settings=settings,reviews=reports,meta_review=meta,checked=checked,historical_outcome=outcomes([r['candidate']['category'] for r in kept],[r['candidate']['severity'] for r in kept],snapshot) if method=='D' else None,tools=logs,sources=sources)
 
@@ -524,7 +528,7 @@ async def rebuttal(paper,text):
     logs=[];responses=[]
     if not isinstance(text,str) or not text.strip():
         raise ValueError("Enter at least one reviewer comment.")
-    parts=await ask("Identify the distinct reviewer requests. Return {concerns:[{quote:string,category:string}]}. "
+    parts=await ask("Identify the distinct reviewer requests and questions, including invitations to discuss an idea without a requested change. Return {concerns:[{quote:string,category:string}]}. "
                     "For quote copy a complete question or sentence verbatim from the review. Give each a short descriptive category. "
                     "Keep distinct requests separate and preserve their order.",review=text)
     concerns=[]
@@ -558,15 +562,18 @@ async def rebuttal(paper,text):
                 examples=[r for r in history if r.get('reply_strategy')==name]
                 observed=[r['resolved'] for r in examples if r.get('resolution_quote') and type(r.get('resolved')) is bool]
                 outcomes_by_strategy[name]=dict(replies=len({r['reply_id'] for r in examples if r.get('reply_id')}),concerns=len(examples),known_outcomes=len(observed),resolved=sum(observed))
-            plan=await ask(skill('rebuttal-writer')+" Return a JSON object with action (clarify, experiment, or revise), evidence_index (one-based integer, or zero), planned_step (an imperative instruction for future work, one sentence), priority (1-3), and effort. Never output a completed experiment or numerical result.",current_concern=critique,current_manuscript_evidence=evidence,historical_response_strategies=strategies)
-            action=plan.get('action')
-            if action not in ('clarify','experiment','revise'):action='revise'
+            plan=await ask(skill('rebuttal-writer')+" Return a JSON object with action (discussion, clarify, revise, or experiment), evidence_index (one-based integer, or zero), planned_step, priority and effort. For discussion use an empty planned_step and null priority and effort. Otherwise give a one-sentence planned step, priority (1-3), and effort. Never output a completed experiment or numerical result.",current_concern=critique,current_manuscript_evidence=evidence,historical_response_strategies=strategies)
+            action=str(plan.get('action','')).strip().lower()
+            if action not in ('discussion','clarify','experiment','revise'):action='revise'
             ref=plan.get('evidence_index',0)
             quote=evidence[ref-1] if type(ref) is int and 0<ref<=len(evidence) else None
             if action=='clarify' and (not quote or quote['role']!='addresses'):action='revise'
             step=str(plan.get('planned_step','')).strip()
-            if not step or any(x in step.lower() for x in ['we have','we found','our results show','we conducted','we demonstrate']):step='Address the reviewer’s question about '+critique.rstrip('.')+'.'
+            if action=='discussion':
+                step=''
+            elif not step or any(x in step.lower() for x in ['we have','we found','our results show','we conducted','we demonstrate']):
+                step='Address the reviewer’s question about '+critique.rstrip('.')+'.'
             draft=await compose_response(ask,paper,critique,quote,step,history,action=action)
-            answer=dict(action=action,draft=draft,existing_evidence=quote,next_step=step,experiment=step if action=='experiment' else '',priority=plan.get('priority',2),effort=plan.get('effort','To estimate'),historical_strategies=strategies)
+            answer=dict(action=action,draft=draft,existing_evidence=quote,next_step=step,experiment=step if action=='experiment' else '',priority=None if action=='discussion' else plan.get('priority',2),effort=None if action=='discussion' else plan.get('effort','To estimate'),historical_strategies=strategies)
             responses.append(dict(critique=critique,category=category,answer=answer,evidence=evidence,history=history,strategy_outcomes=outcomes_by_strategy))
     return dict(responses=responses,tools=logs)

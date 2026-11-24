@@ -13,13 +13,14 @@ from reviewarena.kb import DATA,stats,accepted_decision,current_snapshot,family_
 from reviewarena.paper import parse_pdf,highlight
 from reviewarena.workflow import REVIEWER_ROLES,SCORE_LABELS,run_review,rebuttal,inspect_manuscript,chair_recommendation
 from reviewarena.claims import declared_limitations
+from reviewarena.diagnostics import error_text,traced
 from reviewarena.comparison_reader import inspect_comparison
 from reviewarena.workflow import ask
 from reviewarena.lab import run_lab,meeting_markdown
 from reviewarena.reviewer_ui import WEAKNESS_FIELDS, render_weaknesses, review_items, statement
-from reviewarena.demo_ui import action_buttons,remember_demo,workspace_style
 from reviewarena.rebuttal_ui import (comparison_captions,experiments_by_reviewer_point,render_experiments,
     render_historical_replies,render_manuscript_evidence,render_mentioned_works,show_evidence)
+from reviewarena.demo_ui import action_buttons,remember_demo,workspace_style
 from reviewarena.demos import chair_inputs,demo_path,fingerprint,load_demo,public_lab_result,read_review_demo,read_scope_demo,review_demo_path
 from reviewarena.named_demo_ui import demo_library,save_current_demo
 from reviewarena.summary_ui import render_summary,render_saved_summary
@@ -64,7 +65,7 @@ def call(coro):
     try:
         with st.spinner("Reading evidence…"):return asyncio.run(coro)
     except Exception as exc:
-        st.error(f"The workflow could not finish. {exc}")
+        st.error(f"The workflow could not finish. {error_text(exc)}")
         return None
 def manifest(year):
     path=DATA/f'iclr{year}/manifest.json'
@@ -803,8 +804,8 @@ if activity=="Rebuttal":
             if result:
                 render_historical_replies(responses,rkey)
     if result:
-        if st.session_state.get('reply-demo-'+rkey):draft_panel.caption('Demo · saved rebuttal draft')
         draft_panel=panels["Response draft"]
+        if st.session_state.get('reply-demo-'+rkey):draft_panel.caption('Demo · saved rebuttal draft')
         draft_panel.subheader("Point-by-point response")
         draft_panel.download_button("Download rebuttal draft",rebuttal_markdown(result["responses"]),"rebuttal.md")
         for number,item in enumerate(result['responses'],1):
@@ -857,7 +858,7 @@ else:
         if read_live:
             st.session_state[scope_key+'-demo']=False
             pool=ThreadPoolExecutor(max_workers=1)
-            future=pool.submit(asyncio.run,inspect_manuscript(paper))
+            future=pool.submit(asyncio.run,traced("Manuscript reading",inspect_manuscript(paper)))
             pool.shutdown(wait=False)
             st.session_state[reading_job]=future
         if future is not None and future.done():
@@ -869,7 +870,7 @@ else:
                 remember_demo("reading",[paper["hash"]],scope)
                 st.rerun()
             except Exception as exc:
-                st.session_state[reading_job+'-error']=str(exc)
+                st.session_state[reading_job+'-error']=error_text(exc)
                 st.rerun()
         elif future is not None:
             @st.fragment(run_every=2)
@@ -893,7 +894,8 @@ else:
         st.session_state.pop(key,None)
         updates=Queue()
         pool=ThreadPoolExecutor(max_workers=1)
-        future=pool.submit(asyncio.run,run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put,pdf_bytes=content))
+        review=run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put,pdf_bytes=content)
+        future=pool.submit(asyncio.run,traced("Manuscript review",review))
         pool.shutdown(wait=False)
         st.session_state[jobkey]=dict(future=future,updates=updates,events=[],started=time.monotonic())
         st.rerun()
@@ -923,7 +925,7 @@ else:
             st.session_state[key]=completed
             if not completed['meta_review'].get('error'):
                 remember_demo('review',review_inputs,completed)
-        except Exception as exc:st.session_state[jobkey+'-error']=str(exc)
+        except Exception as exc:st.session_state[jobkey+'-error']=error_text(exc)
         del st.session_state[jobkey]
         st.rerun()
     if error:=st.session_state.pop(jobkey+'-error',None):st.error(error)
@@ -951,9 +953,9 @@ if result:
         run_chair,show_chair=action_buttons(f"Generate AC recommendation with {model_label}","manuscript-chair",
             demo_panel=demo_actions,demo_label="Load saved chair recommendation",live_panel=overview,available=saved_chair is not None)
         if run_chair or show_chair:
-            revised=saved_chair if show_chair else call(chair_recommendation(result['venue'],result['reviews'],
+            revised=saved_chair if show_chair else call(traced("Area chair recommendation",chair_recommendation(result['venue'],result['reviews'],
                 result.get('claims'),decision=meta.get('recommendation'),novelty=result.get('contribution_comparisons'),
-                research_value=result.get('research_value')))
+                research_value=result.get('research_value'))))
             if revised:
                 if run_chair:remember_demo('chair',chair_key,revised)
                 result['meta_review']=meta=revised

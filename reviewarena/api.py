@@ -78,10 +78,10 @@ def rebuttal_markdown(responses):
         action=item['answer']['action']
         answer=item['answer']
         lines.extend([f"## Reviewer point {index}",item['critique']])
-        if 'next_step' in answer:
-            source=answer.get('existing_evidence')
-            if source:
-                lines.extend(['**Existing manuscript evidence**',f"Page {source['page']} · {source['quote']}"])
+        source=answer.get('existing_evidence')
+        if source:
+            lines.extend(['**Existing manuscript evidence**',f"Page {source['page']} · {source['quote']}"])
+        if answer.get('next_step'):
             lines.extend(['**Suggested next step**',answer['next_step']])
         lines.extend([f"**Response to reviewer ({action})**",answer['draft']])
     steps=experiment_checklist(responses)

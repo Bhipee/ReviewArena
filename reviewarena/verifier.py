@@ -1,7 +1,10 @@
 import re
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextvars import copy_context
 import numpy as np
 from .embedding import embed
 from .model import generate
+from .transfer import HISTORICAL_CHECK_WORKERS
 
 def passages(paper):
     out=[]
@@ -139,8 +142,7 @@ def verify_many(paper,candidates,on_verified=None):
     queries=embed(questions)
     displays=find_captions(paper,questions)
     by_text={(b['page'],b['quote']):i for i,b in enumerate(blocks)}
-    out=[]
-    for c,q,captions in zip(candidates,queries,displays):
+    def verify_one(c,q,captions):
         order=np.argsort(-(matrix@q))
         picks=list(order[:8])
         for display in captions:
@@ -184,6 +186,28 @@ def verify_many(paper,candidates,on_verified=None):
                     reason=explanation
                     evidence=[dict(page=caption['page'],quote=anchor,reason=reason,caption=caption['label'],role='addresses')]
                     break
-        out.append(dict(candidate=c,status=status,evidence=evidence,reason=reason,searched_pages=len(paper['pages'])))
-        if on_verified:on_verified(len(out))
+        return dict(candidate=c,status=status,evidence=evidence,reason=reason,searched_pages=len(paper['pages']))
+
+    if len(candidates)==1:
+        result=verify_one(candidates[0],queries[0],displays[0])
+        if on_verified:on_verified(1)
+        return [result]
+
+    out=[None]*len(candidates)
+    next_index=0
+    completed=0
+    pending={}
+    with ThreadPoolExecutor(max_workers=HISTORICAL_CHECK_WORKERS) as pool:
+        while completed<len(candidates):
+            while next_index<len(candidates) and len(pending)<HISTORICAL_CHECK_WORKERS:
+                i=next_index
+                # Carry this manuscript's diagnostic context into each worker.
+                future=pool.submit(copy_context().run,verify_one,candidates[i],queries[i],displays[i])
+                pending[future]=i
+                next_index+=1
+            done,_=wait(pending,return_when=FIRST_COMPLETED)
+            for future in done:
+                out[pending.pop(future)]=future.result()
+                completed+=1
+                if on_verified:on_verified(completed)
     return out

@@ -1,9 +1,39 @@
 import unittest
-from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, patch
 from reviewarena.reply_writer import compose_response, style_examples
 
 
 class ReplyWriterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discussion_drafts_a_conditional_reply_without_creating_work(self):
+        from reviewarena.api import experiment_checklist,rebuttal_markdown
+        from reviewarena import workflow
+
+        question='Could the trade-off change if requests arrive in bursts?'
+        paragraph='If requests arrive together, queueing could outweigh the savings from reuse.'
+        ask=AsyncMock(side_effect=[
+            {'concerns':[{'quote':question,'category':'interpretation'}]},
+            {'action':'Discussion','evidence_index':0,'planned_step':'Add new simulations.','priority':1,'effort':'high'},
+            {'response':paragraph},
+            {'unsupported_quote':''},
+        ])
+        @asynccontextmanager
+        async def kb(*args):
+            yield AsyncMock(return_value=[])
+        with patch.object(workflow,'ask',ask), patch.object(workflow,'connect',kb), patch.object(workflow,'passages',return_value=[]):
+            result=await workflow.rebuttal({'pages':['Cache reuse']},question)
+        rows=result['responses']
+        answer=rows[0]['answer']
+        self.assertEqual((answer['action'],answer['draft']),('discussion',paragraph))
+        self.assertFalse(answer['next_step'] or answer['experiment'] or answer['existing_evidence'])
+        self.assertIsNone(answer['priority'])
+        self.assertIsNone(answer['effort'])
+        self.assertEqual(experiment_checklist(rows),[])
+        exported=rebuttal_markdown(rows)
+        self.assertIn('Response to reviewer (discussion)',exported)
+        self.assertNotIn('Suggested next step',exported)
+        self.assertNotIn('Experiment checklist',exported)
+
     def test_reads_and_deduplicates_actual_reply_text(self):
         history = [{'reply': '{"comment":"We address the two points separately."}'}] * 2
         self.assertEqual(style_examples(history), ['We address the two points separately.'])

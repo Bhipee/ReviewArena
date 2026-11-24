@@ -49,7 +49,7 @@ def verify(directory):
                     r.setdefault(field,None)
                 if r['reply_strategy'] is not None:
                     quote=r['reply_strategy_quote']
-                    if r['reply_strategy'] not in ('clarify','experiment','revise') or not reply or not quote or not any(quote in v for v in values(json.loads(reply))):
+                    if r['reply_strategy'] not in ('discussion','clarify','experiment','revise') or not reply or not quote or not any(quote in v for v in values(json.loads(reply))):
                         raise ValueError(f"Unverified response strategy {file}:{i}")
                 if r.get('resolved') is not None:
                     original=json.loads(packet['reviews'][r['review_id']])

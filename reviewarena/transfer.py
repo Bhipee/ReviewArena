@@ -1,7 +1,10 @@
 """Adapt each historical question to a specific, quoted claim in the new draft."""
 import re
 from difflib import SequenceMatcher
+from .model import bounded_model_map
 
+
+HISTORICAL_CHECK_WORKERS = 2
 
 # Comparisons about message traffic require a claim about exchanging data.
 COMMUNICATION = re.compile(r'\b(?:communicat\w*|bandwidth|network traffic|message passing|'
@@ -29,8 +32,7 @@ def copied_without_subject(question,historical,anchor):
 
 
 async def adapt_questions(candidates,ask):
-    for offset in range(0,len(candidates),5):
-        group=candidates[offset:offset+5]
+    async def adapt_group(group):
         tasks=[dict(id=i,claim=c['matched_claim'],historical_question=c.get('transfer_question') or c['critique_text'])
                for i,c in enumerate(group,1)]
         response=await ask(
@@ -69,6 +71,10 @@ async def adapt_questions(candidates,ask):
                 questions[i]=(question.strip(),anchor)
         for i,c in enumerate(group,1):
             c['target_question'],c['question_anchor']=questions.get(i,('', ''))
+
+    batches=[candidates[i:i+5] for i in range(0,len(candidates),5)]
+    await bounded_model_map(batches,adapt_group,limit=HISTORICAL_CHECK_WORKERS)
+
     selected=[c for c in candidates if c['target_question']]
     if selected:
         checks=[dict(id=i,source_claim=c['matched_claim'],historical_check=c.get('transfer_question') or c['critique_text'],

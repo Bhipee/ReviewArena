@@ -61,7 +61,7 @@ else:
     rows(s,[('The claim','A model aims to reduce computational cost.'),('Reviewer concern','How much time does the model save at comparable performance?'),('What to check','Find the timing comparison and its experimental conditions in the new manuscript and appendix.')])
     text(s,.77,6.37,11.8,.33,'ICLR 2023 · OpenReview forum yIxtevizEA · review los-4aq8a8R',14,False,'66756B')
 s=slide('Live workflow','From a candidate concern to a review decision')
-rows(s,[('Retrieve','Use a claim to find historical trigger passages with a pretrained BGE encoder.'),('Verify','Search the current manuscript for supporting evidence and counterexamples. Preserve page and passage identifiers.'),('Review','A local 4-bit Qwen2.5-3B-Instruct runs three reviewer roles. A chair prompt summarizes supported findings.')])
+rows(s,[('Retrieve','Use a claim to find historical trigger passages with a pretrained BGE encoder.'),('Verify','Search the current manuscript for supporting evidence and counterexamples. Preserve page and passage identifiers.'),('Review','A local 4-bit Qwen2.5-3B-Instruct runs five reviewer roles. A chair prompt summarizes supported findings.')])
 s=slide('Rebuttal','Turn a review into a decision about revision')
 rows(s,[('Clarify','Quote the relevant result and give its location in the draft.'),('Run an experiment','List the measurement that would resolve the question and keep it in future tense.'),('Revise','Acknowledge a limitation or narrow a claim. The author checks the response before use.')])
 frozen_pairs,frozen_papers=db.execute("select count(*),count(distinct paper_id) from read_parquet(?)",[str(ROOT/'data/eval-frozen/indexes/critique.parquet')]).fetchone()

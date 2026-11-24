@@ -51,7 +51,8 @@ def check_historical_concern(paper,candidate,before,claims=None):
 
 
 def run_review(pdf_path,venue="ICLR",method="D",before=None):
-    r=asyncio.run(review_async(_paper(pdf_path),venue,method,before))
+    raw=None if isinstance(pdf_path,dict) else (pdf_path if isinstance(pdf_path,bytes) else Path(pdf_path).read_bytes())
+    r=asyncio.run(review_async(_paper(raw if raw is not None else pdf_path),venue,method,before,pdf_bytes=raw))
     outcome=r.get('historical_outcome') or {}
     return {**r,'accept_prob':outcome.get('rate'),'rejected_candidates':[item for item in r['checked'] if item['status'] not in ('valid','hypothesis')],'tool_logs':r['tools']}
 

@@ -80,7 +80,8 @@ def read_review_demo(path, paper_hash, venue, before):
     if (
         data.get("venue") != venue
         or data.get("request") != request
-        or len(data.get("reviews", [])) != 3
+        or len(data.get("reviews", [])) not in (3, 5)
+        or ("reviewer_panel" in data and data["reviewer_panel"] != [r.get("role") for r in data["reviews"]])
     ):
         raise ValueError(
             "Saved review does not match this manuscript and review request."

@@ -21,7 +21,8 @@ from reviewarena.workflow import chair_recommendation, inspect_manuscript, run_r
 
 
 async def main(args):
-    paper = parse_pdf(args.pdf.read_bytes())
+    raw = args.pdf.read_bytes()
+    paper = parse_pdf(raw)
     sha = paper["hash"]
     before = args.before.isoformat()
     inputs = [sha, args.venue, before]
@@ -43,7 +44,7 @@ async def main(args):
             paper,
             args.venue,
             before=before,
-            prepared_reading=scope,
+            prepared_reading=scope, pdf_bytes=raw,
             on_stage=lambda stage: print(stage["label"], flush=True),
         )
     else:
@@ -68,7 +69,7 @@ async def main(args):
     result["meta_review"] = chair
     save_demo("review", inputs, result)
     print(
-        f"Three reviewers and AC ready for {args.pdf.name} · {args.venue} · {before}.",
+        f"{len(result['reviews'])} reviewers and AC ready for {args.pdf.name} · {args.venue} · {before}.",
         flush=True,
     )
 
@@ -83,6 +84,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="Regenerate the manuscript reading and three reviews.",
+        help="Regenerate the manuscript reading and all reviewer reports.",
     )
     asyncio.run(main(parser.parse_args()))

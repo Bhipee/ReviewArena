@@ -9,7 +9,7 @@ with sync_playwright() as p:
     page.goto('http://127.0.0.1:8516')
     select_example(page,'Efficient Dictionary Learning with Switch Sparse Autoencoders')
     set_demo_panel(page,False)
-    page.get_by_role('button',name='Run three reviewers').wait_for()
+    page.get_by_role('button',name='Run 5 reviewers').wait_for()
     page.screenshot(path=ROOT/'manuscript.png')
     page.get_by_role('radio',name='Rebuttal',exact=True).check()
     page.get_by_role('heading',name='Rebuttal',exact=True).wait_for()

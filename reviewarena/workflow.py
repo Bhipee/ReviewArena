@@ -3,6 +3,8 @@ from datetime import date
 from .consistency import check_manuscript
 from .comparisons import comparison_reviews
 from .investigation import investigate,cited_weaknesses
+from .presentation_review import presentation_review
+from .reviewer_roles import PRESENTATION,INNOVATION,QUERIES,REVIEWER_ROLES,reviewer_prompt,reviewer_passages,reviewer_conflicts,specialist_finding
 from .reply_writer import compose_response
 from .severity import check_rating
 from .novelty import compare_contributions
@@ -36,24 +38,16 @@ def chunks(pages,limit=22000):
 from .verifier import verify_many,passages,check_answer_scope
 from .embedding import embed
 
-REVIEWER_ROLES=('Theory and assumptions','Experiments and evaluation','Clarity and reproducibility')
-
 def assign_findings(findings):
-    from .embedding import embed
-    from scipy.optimize import linear_sum_assignment
-    import numpy as np
     groups=[[] for _ in REVIEWER_ROLES]
     if not findings:return groups
-    specialties=embed(['Theoretical justification, identifiability, proofs, assumptions, causal attribution and guarantees.',
-                       'Experimental design, ablation, baselines, data, metrics, computational cost, robustness and generalization.',
-                       'Clarity of exposition, missing definitions, implementation detail, documentation and reproducibility.'])
-    questions=[item['candidate']['category']+' '+(item['candidate'].get('transfer_question') or item['candidate']['critique_text']) for item in findings]
-    similarity=embed(questions)@specialties.T
-    slots=(len(findings)+2)//3
-    utility=np.hstack([similarity-.03*level for level in range(slots)])
-    for row,column in zip(*linear_sum_assignment(-utility)):
-        groups[column%3].append(findings[row])
+    specialties=embed(list(QUERIES.values()))
+    questions=[r['candidate']['category']+' '+(r['candidate'].get('target_question')
+               or r['candidate'].get('transfer_question') or r['candidate']['critique_text']) for r in findings]
+    for row,owner in zip(findings,(embed(questions) @ specialties.T).argmax(axis=1)):
+        groups[owner].append(row)
     return groups
+
 
 async def inspect_manuscript(paper):
     pages=paper['pages']
@@ -182,7 +176,7 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
         pages=pages if isinstance(pages,(list,tuple)) else [pages]
         finding=dict(id=len(findings)+1,kind=kind,statement=statement,
                      pages=sorted({p for p in pages if type(p) is int and p>0}))
-        quotes=[e['quote'] for e in evidence if isinstance(e,dict) and e.get('page') and e.get('quote')]
+        quotes=[e['quote'] for e in evidence if isinstance(e,dict) and e.get('page') and e.get('quote') and e.get('kind')!='visual observation']
         if quotes:
             finding['manuscript_evidence']=quotes[:3]
         findings.append(finding)
@@ -190,7 +184,10 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
     reviewers=[]
     for reviewer in reports:
         report=reviewer['report']
-        reviewers.append(dict(role=reviewer['role'],score=report.get('score'),summary=report.get('summary')))
+        assessment=dict(role=reviewer['role'],score=report.get('score'),summary=report.get('summary'))
+        if focus:=report.get('specialist_finding'):
+            assessment['specialist_finding']=dict(assessment=focus['assessment'],page=focus['source']['page'])
+        reviewers.append(assessment)
         for item in report.get('manuscript_conflicts',[]):
             if item['kind']=='scope_check':
                 continue
@@ -242,7 +239,7 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
     if decision not in ('Accept','Reject'):
         for attempt in range(2):
             verdict=await ask("Make a simulated area-chair decision using the claims, findings and reviewer reports. "
-                              "Weigh demonstrated practical value, conceptual insight or transferable lessons alongside technical novelty and limitations. An established method can answer an important new question. A scope limit only constrains conclusions outside that scope. Judge the substance, not the count of findings. Return recommendation (Accept or Reject).",
+                              "Consider all reviewer recommendations. Weigh evidence rather than votes or repeated mentions. A writing flaw affects the verdict in proportion to its effect on scientific understanding. Weigh demonstrated practical value, conceptual insight or transferable lessons alongside technical novelty and limitations. An established method can answer an important new question. A scope limit only constrains conclusions outside that scope. Judge the substance, not the count of findings. Return recommendation (Accept or Reject).",
                               venue=venue,overall_score_meanings=overall_score_guide(venue),claims=claims or [],findings=findings,reviewers=reviewers)
             decision=str(verdict.get('recommendation','')).strip().capitalize()
             if decision in ('Accept','Reject'):
@@ -304,7 +301,7 @@ async def chair_recommendation(venue,reports,claims=None,decision=None,novelty=N
     raise ValueError('The area chair did not return a decision linked to a finding and its impact.')
 
 
-async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,prepared_reading=None,on_stage=None):
+async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,prepared_reading=None,on_stage=None,pdf_bytes=None):
     if method not in 'ABCD' or len(method)!=1:raise ValueError("Unknown evaluation method")
     if venue not in ('ICLR','NeurIPS'):raise ValueError("Unknown venue")
     def stage(units,label):
@@ -353,7 +350,7 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
             novelty=await compare_contributions(paper,claims,sources,before,ask,scholar)
     # Catalog hits and inconclusive comparisons are for inspection. Send reviewers the
     # actual comparison and its sources only after the passage-level check succeeds.
-    reviewer_novelty=[{k:row[k] for k in ('status','claim','page','title','comparison','prior_quote','validation','validation_page') if k in row}
+    reviewer_novelty=[{k:row[k] for k in ('status','claim','page','title','comparison','prior_quote','prior_url','url','validation','validation_page') if k in row}
                       for row in novelty if row['status'] in ('shared_component','distinct','overlapping') and row.get('comparison')]
     kept=[r for r in checked if r['status'] in ('valid','hypothesis')]
     paper_context=[]
@@ -364,16 +361,16 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
         paper_context=[dict(page=s['start_page'],heading=s['heading'],excerpt=s['excerpt'])
                        for s in paper.get('sections',[]) if s['excerpt'] and s['heading'].casefold() not in ('references','bibliography')][:28]
         paper_context.extend(dict(page=c['page'],excerpt=c['quote']) for c in paper.get('captions',[])[:8])
-        for n,row in enumerate(paper_context,1):
-            row['id']=f'excerpt-{n}'
+        perspectives=await asyncio.to_thread(reviewer_passages,paper)
     research_value=await assess_research_value(pages,claims,paper_context) if method=='D' else None
     conflicts=[]
     if method=='D':
         stage(3.5,"Cross-checking methods, results and appendices")
         conflicts=await check_manuscript(paper,ask)
     groups=await asyncio.to_thread(assign_findings,kept)
+    total=len(REVIEWER_ROLES)
     completed_reviewers=0
-    stage(4,"Investigating and scoring · 0/3 reviewers finished")
+    stage(4,f"Investigating and scoring · 0/{total} reviewers finished")
     async def review(i,role):
         nonlocal completed_reviewers
         assigned=[dict(critique_id=r['candidate']['id'],category=r['candidate']['category'],historical_issue=r['candidate']['critique_text'],target_question=r['candidate'].get('target_question'),current_evidence=r['evidence'],status=r['status']) for r in groups[i]]
@@ -381,29 +378,54 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
         if method=='D':
             shared=[dict(id=f'lead-{n+1}.{j+1}',page=e['page'],quote=e['quote'])
                     for n,lead in enumerate(assigned) for j,e in enumerate(lead['current_evidence'])]
-            trace=await investigate(role,paper,claims,[r['target_question'] for r in assigned],before,ask)
-            guidance=("Assess the strongest supported contribution and the most consequential supported limitation "
-                      "against the same question: what can the reader conclude within the claimed setting? "
-                      "State the decisive manuscript evidence and page. Explain what a limitation changes: "
-                      "the main result, its reproducibility, or only its scope. Credit solid evidence within scope. "
-                      "If a necessary comparison or premise fails, explain which claim loses support. "
-                      "Optional leads may be ignored or rebutted. Do not invent a strength or flaw to fill a field. "
-                      "Give substantive weight to a consequential practical question answered convincingly, "
-                      "a revealing change of perspective, or an insight other researchers can apply. "
-                      "These can justify Accept or Strong accept with established methods and modest benchmark gains. "
-                      "Use the manuscript to evaluate the proposed research value; absence of a proposed value is neutral. "
-                      "Distinguish a demonstrated insight from hoped-for adoption or unverified priority. "
-                      "Assign the venue rating that best fits the balance of evidence.")
-            form=dict(summary="Briefly explain why the evidence supports the selected rating, citing a manuscript page.",
+            excerpts=perspectives[role]
+            audit=None
+            if role==PRESENTATION:
+                audit=await presentation_review(paper,pdf_bytes)
+                excerpts=audit["sources"]+excerpts
+            if role==INNOVATION:
+                comparisons=[dict(id=f"contribution-{i}",page=r["page"],quote=r["claim"],
+                                  comparison=r["comparison"],prior_work=r["title"],prior_url=r.get("prior_url") or r.get("url"),status=r["status"])
+                             for i,r in enumerate(reviewer_novelty,1) if r.get("title")]
+                value=[dict(id="value",**research_value)] if research_value else []
+                excerpts=comparisons+value+excerpts
+            owned_conflicts=reviewer_conflicts(role,conflicts)
+            trace=await investigate(role,paper,claims,[r['target_question'] for r in assigned if r['target_question']],before,ask,excerpts)
+            observed=[r for step in trace for r in step['results'] if r.get('page')]
+            role_evidence=excerpts+shared+observed
+            # Keep visual observations in the short read even when the PDF has many captions.
+            focus_sources=(sorted(excerpts,key=lambda r:r.get("kind")!="visual observation")[:8]+shared[:2]+observed[:2])
+            finding=await specialist_finding(role,focus_sources,ask,audit["mode"] if audit else "Manuscript evidence")
+            primary={r['id']:r for r in role_evidence}
+            evidence=dict(specialist_finding=finding,specialist_passages=excerpts,investigation=trace,optional_source_passages=shared,
+                          optional_leads=assigned,cross_checks=owned_conflicts,claims=claims,settings=settings,
+                          proposed_research_value=research_value,contribution_comparisons=reviewer_novelty)
+            if audit:
+                evidence["presentation_evidence_mode"]=audit["mode"]
+            if role==INNOVATION and not reviewer_novelty:
+                evidence["comparison_coverage"]="No verified passage-level comparison; novelty remains uncertain."
+            evidence["paper_wide_consistency_checks"]=[r["issue"] for r in conflicts if r not in owned_conflicts and r["kind"]!="scope_check"]
+            brief=reviewer_prompt(role)+(
+                "Write a specialist assessment that would still identify your perspective if its heading were hidden. "
+                "Your specialist finding will appear separately. Write the overall assessment as a publication "
+                "decision and its scientific rationale. Relate your supported specialist finding to specific "
+                "scientific evidence for the whole paper, with a page or named result. "
+                "Weigh one important scientific strength or limitation beyond your specialty when material. "
+                "An elegant presentation alone cannot justify acceptance; modest writing issues alone cannot justify rejection. "
+                "Use the venue scale for an overall score. Different reviewers may agree. Skip the abstract recap. "
+                "Choose lead_evidence_id from a manuscript passage supporting your main judgment. ")
+            guidance=("Weigh the strongest demonstrated contribution and material limitations in the claimed setting. "
+                      "Practical utility, a rigorous new perspective or a reusable lesson can justify a high overall rating "
+                      "with modest benchmark gains. Credit only supported value and qualify comparisons with prior work.")
+            form=dict(lead_evidence_id="one manuscript passage ID",summary="2–3 sentences: recommendation on the whole manuscript, a specific scientific reason and a material qualification if supported",
                       score=list(rubric['scores']),confidence="integer 1 to 5",
                       criteria={name:"integer 1 to 4 or null" for name in rubric['criteria']},
                       strengths=["specific supported contribution and its page; empty list if none"],
                       weaknesses=[dict(issue="specific supported limitation; empty list if none",evidence_ids=["source IDs"])],
                       questions=["material unresolved question; empty list if none"])
             try:
-                report=await ask(f"Assess the submitted manuscript as the specified reviewer. Give an overall integer rating from the supplied scale even if there are no historical matches. Higher is better. {guidance} Use contribution_comparisons for originality within the compared works. Shared components and insufficient evidence do not warrant a novelty penalty. Historical reviews only illustrate standards. Return one flat JSON object following the form. Write summary as plain text and select exactly one score.",
-                                 venue=venue,overall_score_meanings=overall_score_guide(venue),role=role,form=form,claims=claims,settings=settings,manuscript=paper_context,
-                                 proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,cross_checks=conflicts,contribution_comparisons=reviewer_novelty,other_papers=contexts)
+                report=await ask(brief+f"Give an overall integer rating from the supplied scale even if there are no historical matches. Higher is better. {guidance} Use contribution_comparisons for originality within the compared works. Shared components and insufficient evidence do not warrant a novelty penalty. Return one JSON object following the form.",
+                                 role=role,venue=venue,overall_score_meanings=overall_score_guide(venue),form=form,**evidence)
             except ModelJSONError:
                 # Retry with the compact rating form below when the detailed response is truncated.
                 report={}
@@ -412,12 +434,19 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
                 if isinstance(nested,dict) and 'score' in nested:
                     report=nested
         else:
-            report=await ask(skill(venue.lower()+'-reviewer'),overall_score_meanings=overall_score_guide(venue),role=role,claims=claims,settings=settings,assigned=assigned,background=contexts,prior_publications=sources,manuscript_notes=paper_context,method=method)
-        raw_score=report.get('score')
-        report['score']=rubric_rating(raw_score,rubric['scores'])
-        if method=='D' and (report['score'] is None or not isinstance(report.get('summary'),str) or not report['summary'].strip()):
-            revised=await ask(f"Assign an overall manuscript score independently of historical matches. Choose exactly one integer from allowed_scores. {guidance} Return JSON with score (integer) and rationale (plain string, one sentence citing a manuscript page) grounded in the supplied manuscript evidence.",
-                              role=role,overall_score_meanings=overall_score_guide(venue),allowed_scores=rubric['scores'],claims=claims,settings=settings,notes=paper_context,cross_checks=conflicts,proposed_research_value=research_value,investigation=trace,optional_source_passages=shared,optional_leads=assigned,contribution_comparisons=reviewer_novelty)
+            brief=reviewer_prompt(role)
+            guidance="Give a verdict on the whole paper, explaining the decisive scientific evidence and the scope of your specialist judgment."
+            evidence=dict(claims=claims,settings=settings,assigned=assigned,background=contexts,
+                          prior_publications=sources,manuscript_notes=paper_context,method=method)
+            try:
+                report=await ask(brief+skill(venue.lower()+'-reviewer')+" "+guidance,
+                                 overall_score_meanings=overall_score_guide(venue),role=role,**evidence)
+            except ModelJSONError:
+                report={}
+        report['score']=rubric_rating(report.get('score'),rubric['scores'])
+        if report['score'] is None or not isinstance(report.get('summary'),str) or not report['summary'].strip():
+            revised=await ask(brief+f"Assign an overall manuscript score independently of historical matches. Choose exactly one integer from allowed_scores. {guidance} Return JSON with lead_evidence_id (manuscript passage ID), score (integer) and rationale (plain string giving the specialist judgment with page and an overall publication decision with its scientific rationale) grounded in the supplied manuscript evidence.",
+                              role=role,overall_score_meanings=overall_score_guide(venue),allowed_scores=rubric['scores'],**evidence)
             report['score']=rubric_rating(revised.get('score'),rubric['scores'])
             if report['score'] is None:
                 raise ValueError(f"{role} returned no valid {venue} rating after two attempts.")
@@ -425,34 +454,40 @@ async def run_review(paper,venue="ICLR",method="D",before=None,progress=None,pre
             if not isinstance(rationale,str) or not rationale.strip():
                 raise ValueError(f"{role} returned no readable rationale for its rating.")
             report['summary']=rationale
-        if report['score'] is None and raw_score is not None:
-            report['score_status']='Model returned a value outside the venue scale'
+            report['lead_evidence_id']=revised.get('lead_evidence_id')
         report['confidence']=rubric_rating(report.get('confidence'),range(1,6))
         criteria=report.get('criteria')
         if not isinstance(criteria,dict):criteria={}
         report['criteria']={name:rubric_rating(criteria.get(name,report.get(name)),range(1,5)) for name in rubric['criteria']}
         if method=='D':
+            # Generated payloads can echo input objects. Only our checked sources may populate evidence fields.
+            raw_weaknesses=report.get('weaknesses') or report.get('weakness') or report.get('weaknesss')
+            report={k:report[k] for k in ('score','summary','confidence','criteria','strengths','questions','lead_evidence_id') if k in report}
             report['investigation']=trace
-            excerpts=[dict(id=row['id'],page=row['page'],quote=row['excerpt']) for row in paper_context]
-            report['weaknesses']=cited_weaknesses(report.get('weaknesses'),trace,shared+excerpts)
-            await check_rating(report,role,claims,conflicts,pages,SCORE_LABELS[venue],ask)
+            if finding:report['specialist_finding']=finding
+            if audit:report['presentation_review']=audit
+            if anchor:=primary.get(str(report.pop('lead_evidence_id', ''))):
+                report['focus_evidence']=anchor
+            report['weaknesses']=cited_weaknesses(raw_weaknesses,trace,shared+excerpts)
+            await check_rating(report,role,claims,owned_conflicts,pages,SCORE_LABELS[venue],ask)
         else:
             for field in list(report):
                 if field.lower().startswith('weak') and field!='weaknesses':
                     report.setdefault('weaknesses',report.pop(field))
-        if method=='D' and conflicts:
-            report['manuscript_conflicts']=conflicts
+        if method=='D' and owned_conflicts:
+            report['manuscript_conflicts']=owned_conflicts
+        report['recommendation']=SCORE_LABELS[venue][report['score']]
         if progress:progress({'role':role,'report':report})
         completed_reviewers+=1
-        stage(4+completed_reviewers,f"Investigating and scoring · {completed_reviewers}/3 reviewers finished")
+        stage(4+3*completed_reviewers/total,f"Investigating and scoring · {completed_reviewers}/{total} reviewers finished")
         return dict(role=role,report=report)
     reports=await asyncio.gather(*(review(i,role) for i,role in enumerate(REVIEWER_ROLES)))
-    stage(7,"Synthesizing the three reviews")
+    stage(7,f"Synthesizing {total} reviewer assessments")
     try:
         meta=await chair_recommendation(venue,reports,claims,novelty=novelty,research_value=research_value)
     except ValueError as exc:
         meta=dict(error=str(exc))
-    return dict(method=method,venue=venue,research_value=research_value,contribution_comparisons=novelty,prior_searches=searches,manuscript_conflicts=conflicts,rubric=dict(year=2025,score_labels=SCORE_LABELS[venue],**RUBRICS[venue]),comparison_reviews=contexts if method=='D' else [],request=dict(manuscript_sha256=paper.get('hash'),before=before),protocol=stamp,claims=claims,declared_limitations=declared_limitations(paper),paper_type=paper_type,settings=settings,reviews=reports,meta_review=meta,checked=checked,historical_outcome=outcomes([r['candidate']['category'] for r in kept],[r['candidate']['severity'] for r in kept],snapshot) if method=='D' else None,tools=logs,sources=sources)
+    return dict(method=method,venue=venue,reviewer_panel=list(REVIEWER_ROLES),research_value=research_value,contribution_comparisons=novelty,prior_searches=searches,manuscript_conflicts=conflicts,rubric=dict(year=2025,score_labels=SCORE_LABELS[venue],**RUBRICS[venue]),comparison_reviews=contexts if method=='D' else [],request=dict(manuscript_sha256=paper.get('hash'),before=before),protocol=stamp,claims=claims,declared_limitations=declared_limitations(paper),paper_type=paper_type,settings=settings,reviews=reports,meta_review=meta,checked=checked,historical_outcome=outcomes([r['candidate']['category'] for r in kept],[r['candidate']['severity'] for r in kept],snapshot) if method=='D' else None,tools=logs,sources=sources)
 
 async def response_evidence(critique,blocks,vectors):
     query=(await asyncio.to_thread(embed,[critique]))[0]

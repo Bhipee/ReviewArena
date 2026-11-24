@@ -2,6 +2,7 @@
 import re
 
 from .model import ModelJSONError
+from .reviewer_roles import REVIEWER_ROLES, reviewer_prompt
 
 
 async def check_rating(report, role, claims, conflicts, pages, score_labels, ask):
@@ -36,7 +37,7 @@ async def check_rating(report, role, claims, conflicts, pages, score_labels, ask
             passage['context'] = page[max(0,start-250):start+len(passage['quote'])+250]
     try:
         verdict = await ask(
-            "Review your provisional rating against the primary evidence. Which specific defect, if any, "
+            (reviewer_prompt(role) if role in REVIEWER_ROLES else "") + "Review your provisional rating against the primary evidence. Which specific defect, if any, "
             "would require a substantive correction before the paper's central result can be trusted or "
             "reproduced? Check the actual quoted passages for different variants, cohorts or stages and "
             "weigh remaining strengths. Typos, awkward writing, optional tests, and small secondary "
@@ -96,5 +97,6 @@ async def check_rating(report, role, claims, conflicts, pages, score_labels, ask
     page_numbers = ', '.join(str(n) for n in sorted({p['page'] for p in selected}))
     report['rating_check'] = dict(initial_score=report['score'],severity=level,
                                   evidence=[dict(page=p['page'],quote=p['quote']) for p in selected])
+    report['focus_evidence'] = dict(page=selected[0]['page'],quote=selected[0]['quote'])
     report['score'] = ceiling
     report['summary'] = f"{reason.strip()} (p. {page_numbers})"

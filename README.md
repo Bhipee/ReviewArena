@@ -138,7 +138,11 @@ To prepare a different PDF and review configuration, run the command below with 
 
     .venv/bin/python eval/prepare_review_demo.py manuscript.pdf --venue ICLR --before 2024-10-01
 
-In Manuscript review, **Read claims and experimental settings** opens page-linked passages before the three reviewers run. Claims retain the authors’ wording. The separate limitations panel shows disclosures in the manuscript. The retrieval frequency counts distinct historical reviews in the matching cohort. Several mentions of the same family in one review contribute one count. Running the three reviewers in the same session reuses the reading after checking the PDF hash and all claim and setting passages.
+Each live reviewer gives a verdict on the whole manuscript using the same venue scale. Their evidence focuses on theory and assumptions, experimental evaluation, reproducibility, writing and visual presentation, or originality and research value. The area chair receives all five reports. Earlier saved three-reviewer demos replay their original panel.
+
+The presentation reviewer checks the submitted PDF for visible reference failures, writing, captions and table labels. With an image-capable API it also inspects up to two rendered pages. The report identifies the pages and evidence mode. By default a localhost model uses extracted text and a remote endpoint is offered images. Set `REVIEWARENA_VISION=false` for a text-only endpoint or `true` for a local vision model.
+
+In Manuscript review, **Read claims and experimental settings** opens page-linked passages before the five reviewers run. Claims retain the authors’ wording. The separate limitations panel shows disclosures in the manuscript. The retrieval frequency counts distinct historical reviews in the matching cohort. Several mentions of the same family in one review contribute one count. Running the reviewers in the same session reuses the reading after checking the PDF hash and all claim and setting passages.
 
 The product skills use the 2025 venue-specific score choices. The frozen study retains its original prompts and numeric scale. The official 2025 guides are linked in each reviewer skill.
 

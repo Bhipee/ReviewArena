@@ -26,12 +26,13 @@ async def main(args):
     if args.limit:papers=papers[:args.limit]
     failures=[]
     for p in papers:
-        paper=parse_pdf((folder/(p['id']+'.pdf')).read_bytes())
+        raw=(folder/(p['id']+'.pdf')).read_bytes()
+        paper=parse_pdf(raw)
         for method in args.methods:
             out=run_dir/p['id']/(method+'.json')
             if out.exists():continue
             try:
-                result=await run_review(paper,'ICLR',method,'2024-10-01',lambda msg:print(p['id'],method,msg,flush=True))
+                result=await run_review(paper,'ICLR',method,'2024-10-01',lambda msg:print(p['id'],method,msg,flush=True),pdf_bytes=raw)
             except Exception as exc:
                 write(DATA/'eval-errors'/run_dir.name/p['id']/(method+'.json'),{'error':repr(exc)})
                 print(p['id'],method,'failed:',str(exc),flush=True)

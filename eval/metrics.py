@@ -39,8 +39,8 @@ def score_metrics(rows):
             return float(spearmanr(*zip(*pairs)).statistic)
         return None
     complete=[(r['score'],r['actual_score']) for r in rows
-              if r['scoring_reviewers']==r['assigned_reviewers']==3 and r['actual_score'] is not None]
-    panel_counts={str(n):sum(r['scoring_reviewers']==n for r in rows) for n in range(4)}
+              if r['scoring_reviewers']==r['assigned_reviewers'] and r['scoring_reviewers']>0 and r['actual_score'] is not None]
+    panel_counts={str(n):sum(r['scoring_reviewers']==n for r in rows) for n in range(1+max((r['assigned_reviewers'] for r in rows),default=3))}
     return dict(score_pairs=len(ranks),spearman=correlation(ranks),scoring_panel_counts=panel_counts,
                 complete_score_pairs=len(complete),complete_panel_spearman=correlation(complete),decision_pairs=len(decisions),auc=auc(decisions),
                 accepted_decision_pairs=sum(label for label,_ in decisions),score_based_auc=auc(scored_decisions),

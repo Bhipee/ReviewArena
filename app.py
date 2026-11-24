@@ -11,7 +11,7 @@ load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 from reviewarena.comparisons import POOL,comparison_counts
 from reviewarena.kb import DATA,stats,accepted_decision,current_snapshot,family_ratings,historical_review_section
 from reviewarena.paper import parse_pdf,highlight
-from reviewarena.workflow import SCORE_LABELS,run_review,rebuttal,inspect_manuscript,chair_recommendation
+from reviewarena.workflow import REVIEWER_ROLES,SCORE_LABELS,run_review,rebuttal,inspect_manuscript,chair_recommendation
 from reviewarena.claims import declared_limitations
 from reviewarena.comparison_reader import inspect_comparison
 from reviewarena.workflow import ask
@@ -151,11 +151,11 @@ if activity=="Corpus":
                     st.dataframe(scores)
                     st.caption("Spearman compares predicted and published mean scores. Acceptance AUC uses the historical acceptance estimate and needs both decisions. Blank cells indicate an undefined metric.")
                 if all('scoring_panel_counts' in row for row in paired['methods'].values()):
-                    st.write("How many of the three reviewers gave a score?")
-                    st.table([{'Method':names[m],**{f'{n} scored':row['scoring_panel_counts'][str(n)] for n in range(4)},
+                    st.write("How many reviewers gave a score?")
+                    st.table([{'Method':names[m],**{f'{n} scored':count for n,count in row['scoring_panel_counts'].items()},
                                'Full-panel Spearman':row['complete_panel_spearman']}
                               for m,row in paired['methods'].items()])
-                    st.caption("The main correlation uses the mean of available reviewer scores. The full-panel correlation uses only papers scored by all three reviewers. A blank correlation means the available scores cannot establish a rank correlation.")
+                    st.caption("The main correlation uses the mean of available reviewer scores. The full-panel correlation uses only papers scored by every assigned reviewer. A blank correlation means the available scores cannot establish a rank correlation.")
     citation_results=DATA/'eval-frozen/metrics/citation-confirmation.json'
     if citation_results.exists():
         citations=json.loads(citation_results.read_bytes())
@@ -918,7 +918,7 @@ else:
         st.error(f"The manuscript reading could not finish. {reading_error}")
     jobkey="job-"+key
     job=st.session_state.get(jobkey)
-    run_live,run_demo=action_buttons("Run three reviewers","manuscript-review",live_panel=run_panel,demo_panel=demo_actions,demo_label="Load saved review",available=saved_review_path is not None,
+    run_live,run_demo=action_buttons(f"Run {len(REVIEWER_ROLES)} reviewers","manuscript-review",live_panel=run_panel,demo_panel=demo_actions,demo_label="Load saved review",available=saved_review_path is not None,
         disabled=job is not None,primary=True)
     if run_demo:
         st.session_state.pop(key+'-chair-demo',None)
@@ -930,7 +930,7 @@ else:
         st.session_state.pop(key,None)
         updates=Queue()
         pool=ThreadPoolExecutor(max_workers=1)
-        future=pool.submit(asyncio.run,run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put))
+        future=pool.submit(asyncio.run,run_review(paper,venue,before=cutoff.isoformat(),progress=updates.put,prepared_reading=scope,on_stage=updates.put,pdf_bytes=content))
         pool.shutdown(wait=False)
         st.session_state[jobkey]=dict(future=future,updates=updates,events=[],started=time.monotonic())
         st.rerun()
@@ -971,7 +971,9 @@ if result:
     elif st.session_state.get(key+"-demo"):
         st.badge("Saved example review",icon=":material/history:",color="violet")
     else:
-        st.progress(1.0,text="Review complete · 3/3 reviewers finished")
+        st.progress(1.0,text=f"Review complete · {len(result['reviews'])}/{len(result['reviews'])} reviewers finished")
+    if len(result["reviews"])<len(REVIEWER_ROLES):
+        st.caption(f"This saved run contains {len(result['reviews'])} reviewers. New reviews use {len(REVIEWER_ROLES)}.")
     rubric=result.get('rubric') or {}
     labels={str(k):v for k,v in rubric.get('score_labels',{}).items()}
     if not labels and rubric.get('year')==2025:
@@ -1070,7 +1072,9 @@ if result:
                 st.download_button("Download prepared author notes",prepared,f"author-questions-{paper['hash'][:12]}.md",on_click="ignore")
     overview.subheader("Reviewer assessments")
     raw=demo_trace.toggle("Show raw reviewer weaknesses",key="raw-weaknesses-"+key)
-    for col,r in zip(overview.columns(3),result['reviews']):
+    for i,r in enumerate(result['reviews']):
+        if i%3==0:cols=overview.columns(min(3,len(result['reviews'])-i))
+        col=cols[i%3]
         with col.container(border=True):
             st.markdown('**'+r['role']+'**')
             report=r['report']
@@ -1083,6 +1087,11 @@ if result:
             tone={"Strong accept":"green","Accept":"green","Strong reject":"red","Reject":"red",
                   "Borderline accept":"orange","Borderline reject":"orange"}.get(label,"gray")
             st.badge(f"Score {score} · {label}" if label else f"Score {score}",color=tone,icon=":material/assessment:")
+            if finding:=report.get('specialist_finding'):
+                st.markdown("**Specialist finding**")
+                st.write(finding['assessment'])
+                st.caption(f"Manuscript · p. {finding['source']['page']}")
+                st.markdown("**Overall assessment**")
             st.write(report.get('summary',''))
         if raw:
             demo_trace.markdown("**"+r['role']+"**")
@@ -1104,11 +1113,41 @@ if result:
         reviews=result['reviews']
         index=st.radio("Reviewer",range(len(reviews)),index=saved_view.get("reviewer",0) if active_demo else 0,format_func=lambda i:reviews[i]['role'],horizontal=True,key="reviewer-detail-"+key)
         report=reviews[index]['report']
-        render_weaknesses(report,f"{key}-{index}")
+        if report.get('recommendation'):
+            st.badge(report['recommendation'],icon=':material/assessment:')
+        if finding:=report.get('specialist_finding'):
+            st.subheader("Specialist finding")
+            st.write(finding['assessment'])
+            source=finding['source']
+            source_type="Rendered page observation" if source.get('kind')=="visual observation" else "Manuscript passage"
+            st.caption(f"{source_type} · p. {source['page']}")
+            st.write(source['quote'])
+            if source.get('comparison'):
+                st.write(source['comparison'])
+                if source.get('prior_url'):st.link_button(source['prior_work'],source['prior_url'])
+                else:st.caption(source['prior_work'])
+        elif report.get("recommendation"):
+            st.caption("The reviewer could not ground a separate specialist finding in a specific passage.")
+        if audit:=report.get('presentation_review'):
+            st.caption(audit['mode'] + (" · p. "+', '.join(map(str,audit['inspected_pages'])) if audit['inspected_pages'] else ''))
+            for observation in audit['sources']:
+                if observation['kind']=='printed reference to check':
+                    st.caption(f"Printed cross-reference to check · p. {observation['page']}")
+                    st.write(observation['quote'])
+                elif observation['kind']=='visual observation':
+                    st.write(f"{observation['label']} · p. {observation['page']} · {observation['quote']}")
+            if audit['inspected_pages']:
+                page=st.selectbox('Inspect rendered page',audit['inspected_pages'],key='presentation-page-'+key)
+                st.image(highlight(content,page,''),width=700)
         if report.get('summary') or report.get('score_rationale'):
             st.subheader("Overall assessment")
             if report.get('summary'):st.write(report['summary'])
+            if anchor:=report.get("focus_evidence"):
+                label="Rendered page observation" if anchor.get("kind")=="visual observation" else "Passage supporting this assessment"
+                st.caption(f"{label} · p. {anchor['page']}")
+                st.write(anchor['quote'])
             if report.get('score_rationale'):st.write(report['score_rationale'])
+        render_weaknesses(report,f"{key}-{index}")
         for field,names in (("strengths",("strength","text","description")),("questions",("question","text"))):
             items=[text for item in review_items(report.get(field)) if (text:=statement(item,names))]
             if items:

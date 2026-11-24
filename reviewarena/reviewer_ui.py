@@ -48,12 +48,16 @@ def weakness_cards(report):
                 if not quote or not (page or url):
                     continue
                 excerpt = dict(page=page, title=source.get("title") or "Prior publication", url=url, quote=quote)
+                if source.get("kind") == "visual observation":
+                    excerpt["visual"] = source.get("label") or "Visual observation"
                 if excerpt not in card["sources"]:
                     card["sources"].append(excerpt)
     return list(cards.values())
 
 
 def source_label(source):
+    if source.get("visual"):
+        return f"Rendered page · {source['visual']} · p. {source['page']}"
     return f"Manuscript · p. {source['page']}" if source["page"] else str(source["title"])
 
 

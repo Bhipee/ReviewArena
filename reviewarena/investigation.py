@@ -4,28 +4,24 @@ import re
 
 from .comparisons import comparison_reviews, STOP
 from .model import ModelJSONError
+from .reviewer_roles import reviewer_prompt
 from .verifier import passages
 
 
-async def investigate(role, paper, claims, hints, before, ask):
+async def investigate(role, paper, claims, hints, before, ask, excerpts=()):
     trace = []
     blocks = passages(paper)
     pages = paper['pages']
-    focus={
-        'Theory and assumptions':'Identify the necessary premise for the central claim and check it.',
-        'Experiments and evaluation':'Examine design choices such as splits, controls, baselines or metrics.',
-        'Clarity and reproducibility':'Find what an independent reader needs to reproduce the procedure.'
-    }.get(role,role)
     for turn in range(3):
         try:
             action = await ask(
-                "Investigate the manuscript from your assigned perspective. Form your own question. "
+                reviewer_prompt(role)+"Investigate the manuscript from your assigned perspective. Form your own question. "
                 "Optional leads can be ignored or challenged. Seek strengths as well as weaknesses. "
                 "Choose one action: search_manuscript (query: 2-6 keywords), read_page (page: integer), "
                 "search_prior_work (query: technical keywords for the OpenReview abstract index), "
                 "or finish when existing evidence is sufficient. Use previous observations to decide "
                 "what to do next. Return a flat JSON object with question, action and its argument.",
-                role=role, perspective=focus, claims=claims, optional_leads=hints, total_pages=len(pages),
+                role=role, specialist_passages=excerpts, claims=claims, optional_leads=hints, total_pages=len(pages),
                 opening=pages[0][:1000] if pages else '', previous_actions=trace)
         except ModelJSONError:
             break
